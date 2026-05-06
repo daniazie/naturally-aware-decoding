@@ -1,0 +1,6 @@
+models/*
+logs/*
+__pycache__/
+*/__pycache__/
+*.pdf
+analyze_human.ipynb

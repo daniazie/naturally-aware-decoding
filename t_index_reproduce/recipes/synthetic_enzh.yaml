@@ -1,0 +1,13 @@
+data_path: data/synthetic/enzh/*/test.jsonl
+validation_path: data/synthetic/enzh/oliver_twist_qwen/validation.jsonl
+prompt_field: source
+completion_positive_field: foreignization
+completion_negative_field: domestication
+prompt_template_positive: "Translate the following text into Chinese.\n\n{input}"
+prompt_template_negative: "Translate the following text into Chinese.\n\n{input}"
+batch_size: 4
+num_proc: 10
+max_length: 1024
+model_args:
+  torch_dtype: bfloat16
+device: cuda
