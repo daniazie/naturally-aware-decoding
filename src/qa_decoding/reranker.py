@@ -203,7 +203,7 @@ class TranslationeseReranker:
                 score = rewards[best].item()
                 res.update({"score": score})
             results.append(res)
-        return torch.stack(results)
+        return results
 
     def rerank(self, srcs: List[str], mts: List[List[str]], lang: str, granularity: Literal['token', 'sequence', 'segment'] = 'token', return_score: bool = False, normalise_scores: bool = False, seg_masks: list[torch.Tensor] | None = None):
         if granularity == "segment":
