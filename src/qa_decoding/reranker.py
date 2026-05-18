@@ -122,7 +122,7 @@ class TranslationeseReranker:
         if self.granularity == 'token':
             logps_ratios = logps_ratios.sum(dim=1) / c_mask.sum(dim=1)
         if self.granularity == "segment":
-            per_segment_logps_ratios = [self.compute_per_segment_rewards(ratio, mask) for ratio, mask in zip(logps_ratios, seg_mask)]
+            per_segment_logps_ratios = self.compute_per_segment_rewards(logps_ratios, seg_mask)
             logps_ratios = torch.stack(per_segment_logps_ratios)
         return logps_ratios
     
