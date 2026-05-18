@@ -48,16 +48,11 @@ def get_logps_per_token(**kwargs):
         logps.append(log_likelihood)
     return logps
 
-def score_reward_ratios(rewards_pos, rewards_neg):
-    per_token_rewards, per_seq_rewards = [], []
-    for token_pos, token_neg, seq_pos, seq_neg in zip(rewards_pos["per_token_rewards"], rewards_neg["per_token_rewards"], rewards_pos["per_seq_rewards"], rewards_neg["per_seq_rewards"]):
-        per_token = (token_pos - token_neg).mean().item()
-        per_seq = seq_pos - seq_neg
-
-        per_token_rewards.append(per_token)
-        per_seq_rewards.append(per_seq)
-
-    return torch.tensor(per_token_rewards).flatten(), torch.tensor(per_seq_rewards).flatten()
+def segment(**kwargs):
+    for logits, labels in zip(kwargs['logits'], kwargs['labels']):
+        H = - (logits.softmax(dim=-1) * logits.log_softmax(dim=-1)).sum(dim=-1)
+        I = - logits.log_softmax(dim=-1).gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+        
 
 def score_token_level_likelihood_ratios(pos_logps, neg_logps):
     scores = []

@@ -10,6 +10,7 @@ import numpy as np
 import os
 
 from segmenter import Segmenter
+from utils import pad
 
 code2name = {
     "zho": "Chinese",
@@ -34,16 +35,18 @@ class TranslationeseReranker:
         self.compute_positive = partial(self.compute_logps, model=positive_model)
         self.compute_negative = partial(self.compute_logps, model=negative_model)
 
-    def compute_logps(self, inputs, model: PreTrainedModel):
+    def compute_logps(self, example, model: PreTrainedModel):
+        _exclude_keys = {"completion_mask", "segment_mask"}
         inputs = {
             k: v.to(model.device)
-            for k, v in inputs.items()
+            for k, v in example.items()
+            if not k in _exclude_keys
         }
-        completion_mask: torch.Tensor = inputs.pop("completion_mask")
+        completion_mask: torch.Tensor = example["completion_mask"].clone()
         with torch.no_grad():
             outputs = model(**inputs)
-        logits: torch.Tensor = outputs.logits[:, :-1]
-        labels: torch.Tensor = inputs['input_ids'][:, 1:]
+        logits: torch.Tensor = outputs.logits[:, :-1].cpu()
+        labels: torch.Tensor = inputs['input_ids'][:, 1:].cpu()
         completion_mask = completion_mask[:, 1:].bool()
         
         logps = logits.log_softmax(dim=-1)
@@ -63,8 +66,8 @@ class TranslationeseReranker:
             **kwargs
         )
     
-    def format_messages(self, src: str, mt: str, lang: str,):
-        return {
+    def format_messages(self, src: str, mt: str, lang: str, seg_mask: torch.Tensor | None = None):
+        message = {
             "src": [
                 {"role": "user", "content": f"Translate the following text into {lang}.\n\n{src}"}
             ],
@@ -72,12 +75,23 @@ class TranslationeseReranker:
                 {"role": "assistant", "content": mt}
             ]
         }
+
+        if self.granularity == "segment":
+            message.update({
+                "segment_mask": seg_mask
+            })
+        return message
     
-    def preprocess_batch(self, src: str, mts: List[str], lang: str):
+    def preprocess_batch(self, src: str, mts: List[str], lang: str, seg_masks: torch.Tensor | None = None):
         data = []
-        for mt in mts:
-            sample = self.format_messages(src, mt, lang)
-            data.append(sample)
+        if self.granularity == 'segment':
+            for mt, seg_mask in zip(mts, seg_masks):
+                sample = self.format_messages(src, mt, lang, seg_mask)
+                data.append(sample)
+        else:
+            for mt in mts:
+                sample = self.format_messages(src, mt, lang)
+                data.append(sample)
         return data
     
     def prepare_data(self, example, tokenizer: PreTrainedTokenizerBase):
@@ -88,9 +102,11 @@ class TranslationeseReranker:
         prompt_completion_ids = prompt_completion_processed['input_ids']
         completion_mask = [0] * len(prompt_ids) + [1] * (len(prompt_completion_ids) - len(prompt_ids))
 
-        output['input_ids'] = torch.tensor([prompt_completion_ids])
-        output['attention_mask'] = torch.tensor([prompt_completion_processed['attention_mask']])
-        output['completion_mask'] = torch.tensor([completion_mask])
+        output['input_ids'] = torch.tensor(prompt_completion_ids)
+        output['attention_mask'] = torch.tensor(prompt_completion_processed['attention_mask'])
+        output['completion_mask'] = torch.tensor(completion_mask)
+        if self.granularity == 'segment':
+            output['segment_mask'] = example['segment_mask']
         return output
     
     def compute_per_segment_rewards(self, tensor: torch.Tensor, mask: torch.Tensor):
@@ -99,70 +115,86 @@ class TranslationeseReranker:
         for i, t in enumerate(mask):
             if t < 0:
                 continue
-            if t:
-                segment.append(tensor[i])
-            if t == 0:
-                #segment.append(tensor[i])
-                if segment:
-                    reward = torch.tensor(segment).mean()
-                    rewards.append(reward)
-                segment = [tensor[i]]
             if not i == len(mask) - 1:
                 if mask[i+1] < 0:
                     reward = torch.tensor(segment).mean()
                     rewards.append(reward)
             else:
-                if t > 0:
-                    reward = torch.tensor(segment).mean()
-                    rewards.append(reward)
+                if t:
+                    segment.append(tensor[i])
+                if t == 0:
+                    #segment.append(tensor[i])
+                    if segment:
+                        reward = torch.tensor(segment).mean()
+                        rewards.append(reward)
+                    segment = [tensor[i]]
         return torch.tensor(rewards).mean()
 
-    def compute_rewards(self, log_lklh_positive: torch.Tensor, log_lklh_negative: torch.Tensor, c_mask: torch.Tensor | None = None, seg_mask: torch.Tensor | None = None):
+    def compute_rewards(self, log_lklh_positive: torch.Tensor, log_lklh_negative: torch.Tensor, c_mask: torch.Tensor | None = None, seg_masks: torch.Tensor | None = None):
         logps_ratios = log_lklh_positive - log_lklh_negative
         if self.granularity == 'token':
             logps_ratios = logps_ratios.sum(dim=1) / c_mask.sum(dim=1)
         if self.granularity == "segment":
-            per_segment_logps_ratios = self.compute_per_segment_rewards(logps_ratios, seg_mask)
+            seg_masks = seg_masks[:, 1:]
+            per_segment_logps_ratios = [self.compute_per_segment_rewards(ratio, seg_mask) for ratio, seg_mask in zip(logps_ratios, seg_masks)]
             logps_ratios = torch.stack(per_segment_logps_ratios)
         return logps_ratios
     
-    def _score_loop_segment(self, samples, seg_mask: torch.Tensor):
-        rewards = []
-        for sample, mask in zip(samples, seg_mask):
-            log_lklh_positive = self.compute_positive(sample)
-            log_lklh_negative = self.compute_negative(sample)
 
-            if self.granularity == 'token':
-                c_mask = sample['completion_mask']
-            else:
-                c_mask = None
+    def _score(self, src: str, mts: List[str], lang: str, seg_masks: torch.Tensor | None = None):
+        samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang, seg_masks)]
+        samples = self.collate_fn(samples)
+        log_lklh_positive = self.compute_positive(samples)
+        log_lklh_negative = self.compute_negative(samples)
 
-            reward = self.compute_rewards(log_lklh_positive, log_lklh_negative, c_mask, mask)
-            rewards.append(reward)
-        return torch.stack(rewards)
-
-    def _score_loop(self, samples):
-        rewards = []
-        for sample in samples:
-            log_lklh_positive = self.compute_positive(sample)
-            log_lklh_negative = self.compute_negative(sample)
-
-            if self.granularity == 'token':
-                c_mask = sample['completion_mask']
-            else:
-                c_mask = None
-
-            reward = self.compute_rewards(log_lklh_positive, log_lklh_negative, c_mask)
-            rewards.append(reward)
-        return torch.stack(rewards)
-
-    def _score(self, src: str, mts: List[str], lang: str, seg_mask: torch.Tensor | None = None):
-        samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
-        if self.granularity == 'segment':
-            rewards = self._score_loop_segment(samples, seg_mask)
+        if self.granularity == 'token':
+            c_mask = samples['completion_mask']
+            seg_mask = None
+        elif self.granularity == 'segment':
+            seg_mask = samples['segment_mask']
+            c_mask = None
         else:
-            rewards = self._score_loop(samples)
+            c_mask = None
+            seg_mask = None
+
+        rewards = self.compute_rewards(log_lklh_positive, log_lklh_negative, c_mask, seg_mask)
         return rewards
+    
+    def collate_fn(self, examples):
+        input_ids = [example['input_ids'] for example in examples]
+        attention_mask = [example['attention_mask'] for example in examples]
+        completion_mask = [example['completion_mask'] for example in examples]
+
+        input_ids = pad(
+            input_ids,
+            padding_value=self.tokenizer.pad_token_id,
+        )
+        attention_mask = pad(
+            attention_mask,
+            padding_value=0,
+        )
+        completion_mask = pad(
+            completion_mask,
+            padding_value=0,
+        )
+
+        outputs = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "completion_mask": completion_mask,
+        }
+
+        if self.granularity == "segment":
+            segment_mask = [example['segment_mask'] for example in examples]
+            segment_mask = pad(
+                segment_mask,
+                padding_value=-100,
+            )
+            
+            assert input_ids.shape == segment_mask.shape, f"Mask size `{segment_mask.shape}` does not match inputs size `{input_ids.shape}`."
+            outputs.update({"segment_mask": segment_mask})
+        
+        return outputs
     
     def sigmoid(self, score):
         return 1 / (1 + np.exp(-score))

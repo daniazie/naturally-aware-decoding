@@ -140,7 +140,7 @@ def seg_pipeline(
     for i, batch in enumerate(texts):
         outputs = model.generate(batch['prompt'], sampling_params=sampling_params)
         mts = [[seq.text for seq in output.outputs] for output in outputs]
-        seg_masks = segmenter.compute(batch['prompt'], mts, reranker_args['lang'])
+        seg_masks = segmenter.compute(batch['src'], mts, reranker_args['lang'])
         best = reranker.rerank(batch['src'], mts, seg_masks=seg_masks, **reranker_args)
         if i % 4 == 0:
             gc.collect()

@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     dataset_loader = partial(load_dataset, args.data_path, args.tgt_lang, convert_chat_template=args.vllm)
     if args.segment_level:
-        segmenter = load_segmenter("Qwen/Qwen3-0.6B")
+        segmenter = load_segmenter("Qwen/Qwen2.5-0.5B")
 
     if args.vllm or args.segment_level:
         model = LLM(

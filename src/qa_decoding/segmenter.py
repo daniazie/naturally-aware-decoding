@@ -1,5 +1,7 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerBase, PreTrainedModel
 import torch
+
+from tqdm import tqdm
 from utils import pad
 
 from typing import List
@@ -94,17 +96,18 @@ class Segmenter:
         return segments
 
     @torch.no_grad()
-    def model_forward(self, **batch):
+    def model_forward(self, forward_batch, backward_batch):
         _exclude_keys = {"completion_mask"}
         forward_inputs = {
             k: v.to(self.model.device)
-            for k, v in batch.items()
+            for k, v in forward_batch.items()
             if not k in _exclude_keys
         }
 
         backward_inputs = {
             k: v.fliplr().to(self.model.device)
-            for k, v in forward_inputs.items()
+            for k, v in backward_batch.items()
+            if not k in _exclude_keys
         }
 
         forward_logits: torch.Tensor = self.model(**forward_inputs).logits[:, :-1].cpu()
@@ -113,8 +116,8 @@ class Segmenter:
         forward_labels: torch.Tensor = forward_inputs['input_ids'][:, 1:].cpu()
         backward_labels = backward_inputs['input_ids'][:, :-1].cpu()
 
-        forward_mask: torch.Tensor = batch['completion_mask'][:, 1:].bool().cpu()
-        backward_mask: torch.Tensor = forward_mask.clone().fliplr()
+        forward_mask: torch.Tensor = forward_batch['completion_mask'][:, 1:].bool().cpu()
+        backward_mask: torch.Tensor = backward_batch['completion_mask'][:, :-1].bool().cpu()
 
         outputs = {
             "forward_logits": forward_logits,
@@ -126,12 +129,18 @@ class Segmenter:
         }
 
         return outputs
+    
+    def flip(self, tensors: torch.Tensor):
+        flipped = []
+        for tensor in tensors:
+            flipped.append(torch.tensor(tensor.tolist()[::-1]))
+        return torch.stack(flipped)
 
     def compute_segment(self, forward_logits: torch.Tensor, backward_logits: torch.Tensor, forward_labels: torch.Tensor, backward_labels: torch.Tensor, forward_completion_mask: torch.Tensor, backward_completion_mask: torch.Tensor):
         H_forward = self.H(forward_logits).masked_fill(~forward_completion_mask, 0)
         I_forward = self.I(forward_logits, forward_labels).masked_fill(~forward_completion_mask, 0)
-        H_backward = self.H(backward_logits).fliplr().masked_fill(~backward_completion_mask, 0)
-        I_backward = self.I(backward_logits, backward_labels).fliplr().masked_fill(~backward_completion_mask, 0)
+        H_backward = self.flip(self.H(backward_logits)).masked_fill(~backward_completion_mask, 0)
+        I_backward = self.flip(self.I(backward_logits, backward_labels)).masked_fill(~backward_completion_mask, 0)
 
         end_new, start, forward_bp, forward_obg = self.get_boundaries(H_forward, I_forward)
         start_new, end, backward_bp, backward_obg = self.get_boundaries(H_backward, I_backward)
@@ -165,7 +174,8 @@ class Segmenter:
         return data
     
     def prepare_sample(self, sample):
-        output = {}
+        forward_input = {}
+        backward_input = {}
         prompt_ids = self.tokenize_fn(
             sample['prompt'],
             tokenizer=self.tokenizer,
@@ -181,11 +191,15 @@ class Segmenter:
         attention_mask = prompt_completion_processed['attention_mask']
         completion_mask = [0] * len(prompt_ids) + [1] * (len(prompt_completion_ids) - len(prompt_ids))
 
-        output['input_ids'] = torch.tensor(prompt_completion_ids)
-        output['attention_mask'] = torch.tensor(attention_mask)
-        output['completion_mask'] = torch.tensor(completion_mask)
+        forward_input['input_ids'] = torch.tensor(prompt_completion_ids)
+        forward_input['attention_mask'] = torch.tensor(attention_mask)
+        forward_input['completion_mask'] = torch.tensor(completion_mask)
 
-        return output
+        backward_input['input_ids'] = torch.tensor(prompt_completion_ids[::-1])
+        backward_input['attention_mask'] = torch.tensor(attention_mask[::-1])
+        backward_input['completion_mask'] = torch.tensor(completion_mask[::-1])
+
+        return forward_input, backward_input
 
     def collate_fn(self, examples):
         input_ids = [example['input_ids'] for example in examples]
@@ -211,22 +225,22 @@ class Segmenter:
             "completion_mask": completion_mask
         }
     
-    def per_sample_compute(self, examples):
-        inputs = self.collate_fn(examples)
-        outputs = self.model_forward(**inputs)
-        seg_masks = self.compute_segment(**outputs)
-        return seg_masks
-
-    def prepare_data(self, prompt, completions, lang):
-        batch = self.preprocess_batch(prompt, completions, code2name[lang])
-        examples = [self.prepare_sample(sample) for sample in batch]
-        return examples
+    def get_batch(self, prompt, completion, lang):
+        samples = [self.prepare_sample(sample) for sample in self.preprocess_batch(prompt, completion, lang)]
+        forward_batch, backward_batch = [], []
+        for sample in samples:
+            forward_batch.append(sample[0])
+            backward_batch.append(sample[1])
+        forward_batch = self.collate_fn(forward_batch)
+        backward_batch = self.collate_fn(backward_batch)
+        return forward_batch, backward_batch
 
     def compute(self, prompts: List[str], completions: List[List[str]], lang: str):
         masks = []
-        for prompt, completion in zip(prompts, completions):
-            examples = self.prepare_data(prompt, completion, lang)
-            seg_masks = self.per_sample_compute(examples)
+        for prompt, completion in tqdm(zip(prompts, completions), total=len(prompts), desc="Segmenting..."):
+            forward_batch, backward_batch = self.get_batch(prompt, completion, lang)
+            outputs = self.model_forward(forward_batch, backward_batch)
+            seg_masks = self.compute_segment(**outputs)
             masks.append(seg_masks)
         return masks
     

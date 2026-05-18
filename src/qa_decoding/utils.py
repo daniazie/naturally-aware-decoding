@@ -70,9 +70,8 @@ def pad(
     padding_value: int = 0,
     padding_side: str = 'right',
     pad_to_multiple_of: int | None = None,
-    max_length: int | None = None
 ) -> torch.Tensor:
-    output_shape = [max_length] if max_length else np.max([t.shape for t in tensors], 0).tolist()
+    output_shape = np.max([t.shape for t in tensors], 0).tolist()
 
     if pad_to_multiple_of is not None:
         remainder = output_shape[0] % pad_to_multiple_of
