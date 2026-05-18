@@ -228,5 +228,5 @@ class Segmenter:
             examples = self.prepare_data(prompt, completion, lang)
             seg_masks = self.per_sample_compute(examples)
             masks.append(seg_masks)
-        return torch.tensor(masks)
+        return masks
     
