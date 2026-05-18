@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from functools import partial
+from comet import load_from_checkpoint, download_model
 
 import torch
 import numpy as np
@@ -29,10 +30,10 @@ class RerankerConfig:
 
 class TranslationeseReranker:
     def __init__(self, model_dir: str | os.PathLike, tokenizer: str | os.PathLike | None = None, **model_kwargs):
-        positive_model = AutoModelForCausalLM.from_pretrained(f"{model_dir}/negative", **model_kwargs)
+        self.positive_model = AutoModelForCausalLM.from_pretrained(f"{model_dir}/negative", **model_kwargs)
         negative_model = AutoModelForCausalLM.from_pretrained(f"{model_dir}/positive", **model_kwargs)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer if tokenizer is not None else f"{model_dir}/negative")
-        self.compute_positive = partial(self.compute_logps, model=positive_model)
+        self.compute_positive = partial(self.compute_logps, model=self.positive_model)
         self.compute_negative = partial(self.compute_logps, model=negative_model)
 
     def compute_logps(self, example, model: PreTrainedModel):
@@ -115,20 +116,23 @@ class TranslationeseReranker:
         for i, t in enumerate(mask):
             if t < 0:
                 continue
+            if t:
+                segment.append(tensor[i])
+            if t == 0:
+                if segment:
+                    reward = torch.tensor(segment).mean()
+                    rewards.append(reward)
+                segment = [tensor[i]]
             if not i == len(mask) - 1:
                 if mask[i+1] < 0:
                     reward = torch.tensor(segment).mean()
                     rewards.append(reward)
             else:
-                if t:
-                    segment.append(tensor[i])
-                if t == 0:
-                    #segment.append(tensor[i])
-                    if segment:
-                        reward = torch.tensor(segment).mean()
-                        rewards.append(reward)
-                    segment = [tensor[i]]
-        return torch.tensor(rewards).mean()
+                if t > 0:
+                    reward = torch.tensor(segment).mean()
+                    rewards.append(reward)
+
+        return torch.stack(rewards).mean()
 
     def compute_rewards(self, log_lklh_positive: torch.Tensor, log_lklh_negative: torch.Tensor, c_mask: torch.Tensor | None = None, seg_masks: torch.Tensor | None = None):
         logps_ratios = log_lklh_positive - log_lklh_negative
@@ -185,11 +189,7 @@ class TranslationeseReranker:
         }
 
         if self.granularity == "segment":
-            segment_mask = [example['segment_mask'] for example in examples]
-            segment_mask = pad(
-                segment_mask,
-                padding_value=-100,
-            )
+            segment_mask = torch.stack([example['segment_mask'] for example in examples])
             
             assert input_ids.shape == segment_mask.shape, f"Mask size `{segment_mask.shape}` does not match inputs size `{input_ids.shape}`."
             outputs.update({"segment_mask": segment_mask})
@@ -210,7 +210,7 @@ class TranslationeseReranker:
             }
 
             if normalise_scores:
-                rewards = rewards.sigmoid(-1).item()
+                rewards = rewards.sigmoid()
 
             if return_score:
                 score = rewards[best].item()
@@ -229,7 +229,7 @@ class TranslationeseReranker:
             }
 
             if normalise_scores:
-                rewards = rewards.sigmoid(-1).item()
+                rewards = rewards.sigmoid()
 
             if return_score:
                 score = rewards[best].item()
@@ -259,3 +259,5 @@ class TranslationeseReranker:
                 normalise_scores=normalise_scores
             )
         return results
+    
+

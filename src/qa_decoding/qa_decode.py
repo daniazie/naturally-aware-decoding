@@ -113,8 +113,8 @@ def vllm_pipeline(
 
 def seg_pipeline(
     model: LLM,
-    segmenter: Segmenter,
     texts: List[dict] | Dict[str, List[str]] | Dataset,
+    segmenter: str | Segmenter | None = None,
     batch_size: int = 4,
     device_map: str = "auto",
     sampling_params: SamplingParams | None = None,
@@ -125,6 +125,11 @@ def seg_pipeline(
         model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
         device_map=device_map
     )
+
+    if segmenter is None:
+        segmenter = Segmenter(model=reranker.positive_model, tokenizer=reranker.tokenizer)
+    elif isinstance(segmenter, str):
+        segmenter = Segmenter(model=segmenter)
 
     if isinstance(texts, list):
         texts = Dataset.from_list(texts)

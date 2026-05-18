@@ -33,14 +33,9 @@ def init_parser():
     parser.add_argument('--segment_level', action='store_true', default=False)
     return parser
 
-def load_segmenter(model_path):
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_method="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-    )
-    model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', dtype=torch.bfloat16, quantization_config=quantization_config)
+def load_segmenter():
+    model_path = "t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10/negative"
+    model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto', dtype=torch.bfloat16)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     segmenter = Segmenter(model=model, tokenizer=tokenizer)
     return segmenter
@@ -54,13 +49,14 @@ if __name__ == "__main__":
 
     dataset_loader = partial(load_dataset, args.data_path, args.tgt_lang, convert_chat_template=args.vllm)
     if args.segment_level:
-        segmenter = load_segmenter("Qwen/Qwen2.5-0.5B")
+        segmenter = load_segmenter()
 
     if args.vllm or args.segment_level:
         model = LLM(
             args.model,
             seed=42,
-            quantization="bitsandbytes"
+            quantization="bitsandbytes",
+            gpu_memory_utilization=0.85 if args.segment_level else 0.92
         )
 
         dataset = dataset_loader(tokenizer=model.get_tokenizer())
@@ -72,10 +68,8 @@ if __name__ == "__main__":
         )
 
         if args.segment_level:
-            
             preds = seg_pipeline(
                 model,
-                segmenter=segmenter,
                 texts=dataset,
                 batch_size=args.batch_size,
                 reranker_args=asdict(reranker_args),

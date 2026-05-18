@@ -29,7 +29,7 @@ class Segmenter:
         return - (probs * logps).sum(-1)
 
     def I(self, logits: torch.Tensor, labels: torch.Tensor):
-        return - logits.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+        return - logits.log_softmax(-1).gather(-1, labels.unsqueeze(-1)).squeeze(-1)
 
     def tau(self, tensors: torch.Tensor):
         maxima_masks = []
@@ -244,3 +244,8 @@ class Segmenter:
             masks.append(seg_masks)
         return masks
     
+    def cuda(self):
+        return self.model.cuda()
+    
+    def cpu(self):
+        return self.model.cpu()
