@@ -1,2 +1,5 @@
 .venv/
 uv.lock
+.vscode/
+__pycache__/
+_tests

@@ -1,3 +1,6 @@
 [submodule "TranslationeseIndex"]
 	path = TranslationeseIndex
 	url = https://github.com/yikang0131/TranslationeseIndex.git
+[submodule "NTREX"]
+	path = NTREX
+	url = https://github.com/MicrosoftTranslator/NTREX.git

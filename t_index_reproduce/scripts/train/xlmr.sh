@@ -1,7 +1,7 @@
 train_data_dir=$1
 seed=$2
 
-accelerate launch src/run_classification.py \
+uv run accelerate launch src/run_classification.py \
     --model_name_or_path FacebookAI/xlm-roberta-large \
     --max_seq_length 512 \
     --shuffle_seed ${seed} \
@@ -17,7 +17,7 @@ accelerate launch src/run_classification.py \
     --logging_steps 1 \
     --save_strategy no \
     --seed ${seed} \
-    --param_dtype bf16 \
+    --bf16 \
     --eval_steps 50 \
     --report_to tensorboard
 

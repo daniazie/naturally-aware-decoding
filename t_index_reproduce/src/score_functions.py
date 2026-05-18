@@ -8,7 +8,7 @@ def featurize_fn(examples, model, tokenizer):
     results = { "labels": [], "logits": [], "hidden_states": [] }
     for messages in examples["messages"]:
         input_len = len(tokenizer.apply_chat_template(messages[:-1], add_generation_prompt=True))
-        input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt").to(model.device)
+        input_ids = tokenizer.apply_chat_template(messages, return_dict=False, return_tensors="pt").to(model.device)
         outputs = model(input_ids, output_hidden_states=True)
         labels = input_ids[:,input_len:]
         output_feats = [hs[:,input_len:,:].mean(dim=1)[-1] for hs in outputs.hidden_states]
@@ -18,12 +18,52 @@ def featurize_fn(examples, model, tokenizer):
         results["hidden_states"].append(output_feats)
     return results
 
+@torch.no_grad()
+def compute_rewards_fn(examples, model, tokenizer):
+    results = { "per_token_rewards": [], "per_seq_rewards": []}
+    score_fn = getattr(model, 'score')
+    for messages in examples["messages"]:
+        model_inputs = tokenizer.apply_chat_template(messages, return_dict=True, return_tensors="pt").to(model.device)
+        rewards, outputs = model(**model_inputs, return_output=True)
+
+        per_token_rewards = score_fn(outputs.last_hidden_state).squeeze(-1)
+        results["per_seq_rewards"].append(rewards)
+        results["per_token_rewards"].append(per_token_rewards)
+    results["per_seq_rewards"] = torch.tensor(results['per_seq_rewards'])
+    return results
+
 def score_log_likelihood(**kwargs):
     scores = []
     for logits, labels in zip(kwargs["logits"], kwargs["labels"]):
         labels = labels.unsqueeze(-1)
         log_likelihood = logits.log_softmax(dim=-1).gather(dim=-1, index=labels).squeeze(-1)
         scores.append(log_likelihood.mean().item())
+    return torch.tensor(scores)
+
+def get_logps_per_token(**kwargs):
+    logps = []
+    for logits, labels in zip(kwargs["logits"], kwargs["labels"]):
+        labels = labels.unsqueeze(-1)
+        log_likelihood = logits.log_softmax(dim=-1).gather(dim=-1, index=labels).squeeze(-1)
+        logps.append(log_likelihood)
+    return logps
+
+def score_reward_ratios(rewards_pos, rewards_neg):
+    per_token_rewards, per_seq_rewards = [], []
+    for token_pos, token_neg, seq_pos, seq_neg in zip(rewards_pos["per_token_rewards"], rewards_neg["per_token_rewards"], rewards_pos["per_seq_rewards"], rewards_neg["per_seq_rewards"]):
+        per_token = (token_pos - token_neg).mean().item()
+        per_seq = seq_pos - seq_neg
+
+        per_token_rewards.append(per_token)
+        per_seq_rewards.append(per_seq)
+
+    return torch.tensor(per_token_rewards).flatten(), torch.tensor(per_seq_rewards).flatten()
+
+def score_token_level_likelihood_ratios(pos_logps, neg_logps):
+    scores = []
+    for pos, neg in zip(pos_logps, neg_logps):
+        llr = pos - neg
+        scores.append(llr.mean().item())
     return torch.tensor(scores)
 
 def score_negative_entropy(**kwargs):

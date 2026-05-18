@@ -13,7 +13,7 @@ import datasets
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-from utils import format_messages
+from train_utils import format_messages
 
 
 def main(args):

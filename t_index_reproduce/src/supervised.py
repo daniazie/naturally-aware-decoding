@@ -16,8 +16,7 @@ from tqdm import tqdm
 from openrlhf.datasets import RewardDataset
 
 
-from utils import format_messages
-
+from train_utils import format_messages
 
 def rm(reward_model, tokenizer, data, batch_size, max_length):
     
@@ -298,7 +297,7 @@ def main(args):
         reward_model = get_llm_for_sequence_regression(
             args.model_path,
             "reward",
-            bf16=True,
+            param_dtype='bf16',
             init_value_head=False,
         )
         return reward_model
