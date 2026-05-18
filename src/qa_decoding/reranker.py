@@ -197,7 +197,7 @@ class TranslationeseReranker:
             }
 
             if normalise_scores:
-                rewards = rewards.softmax(-1).item()
+                rewards = rewards.sigmoid(-1).item()
 
             if return_score:
                 score = rewards[best].item()
