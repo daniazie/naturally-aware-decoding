@@ -63,7 +63,7 @@ if __name__ == "__main__":
         )
 
         dataset = dataset_loader(tokenizer=model.get_tokenizer())
-
+        print(dataset[:3])
         sampling_params = SamplingParams(
             n=args.best_of,
             seed=42,
@@ -115,5 +115,5 @@ if __name__ == "__main__":
         )
 
     os.makedirs('/'.join(args.output_file.split('/')[:-1]), exist_ok=True)
-    with open(args.output_file, "w") as file:
+    with open(args.output_file, "w", encoding='utf-8') as file:
         json.dump(preds, file, indent=2, ensure_ascii=False)

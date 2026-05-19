@@ -35,7 +35,7 @@ def load_dataset(data_path="NTREX/NTREX-128", tgt_lang: str = "zho", convert_cha
         lang_code = tgt_lang + "-CN"
     else:
         lang_code = tgt_lang
-    with open(f"{data_path}/newstest2019-ref.{lang_code}.txt", "r") as file:
+    with open(f"{data_path}/newstest2019-ref.{lang_code}.txt", "r", encoding='utf-8') as file:
         ref = file.readlines()
     dataset =  Dataset.from_dict({"src": src, "ref": ref})
     dataset = dataset.map(format_messages, fn_kwargs={"lang": code2name[tgt_lang]}, batched=True)

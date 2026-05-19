@@ -56,17 +56,17 @@ class Segmenter:
         t_max = tensors.masked_fill(~maxima_masks, 0).unsqueeze(-1).sum(dim=1) / c_masks.sum(dim=1)
         return t_max, t_all, maxima_masks, minima_masks
 
-    def get_bs(self, tensor: torch.Tensor):
-        t_max, t_all, maximas, minimas = self.tau(tensor)
+    def get_bs(self, tensor: torch.Tensor, c_masks: torch.Tensor):
+        t_max, t_all, maximas, minimas = self.tau(tensor, c_masks)
         b0_mask = tensor >= t_max
         b1_mask = tensor >= t_all
         b2_mask = maximas
         b3_mask = ~minimas
         return b0_mask, b1_mask, b2_mask, b3_mask
 
-    def get_boundaries(self, H: torch.Tensor, I: torch.Tensor):
-        H_bs = self.get_bs(H)
-        I_bs = self.get_bs(I)
+    def get_boundaries(self, H: torch.Tensor, I: torch.Tensor, c_masks: torch.Tensor):
+        H_bs = self.get_bs(H, c_masks)
+        I_bs = self.get_bs(I, c_masks)
 
         strong = (H_bs[0] & H_bs[2]) & (I_bs[1] | I_bs[3])
         weak = (H_bs[1] & H_bs[2]) & (I_bs[1] | I_bs[3])
@@ -142,8 +142,8 @@ class Segmenter:
         H_backward = self.flip(self.H(backward_logits)).masked_fill(~backward_completion_mask, 0)
         I_backward = self.flip(self.I(backward_logits, backward_labels)).masked_fill(~backward_completion_mask, 0)
 
-        end_new, start, forward_bp, forward_obg = self.get_boundaries(H_forward, I_forward)
-        start_new, end, backward_bp, backward_obg = self.get_boundaries(H_backward, I_backward)
+        end_new, start, forward_bp, forward_obg = self.get_boundaries(H_forward, I_forward, forward_completion_mask)
+        start_new, end, backward_bp, backward_obg = self.get_boundaries(H_backward, I_backward, backward_completion_mask)
 
         masks = (((start_new | backward_obg) | (end | backward_bp)) | ((start | forward_bp) | (end_new | forward_obg))).int().masked_fill(~forward_completion_mask, -100)
         return masks
