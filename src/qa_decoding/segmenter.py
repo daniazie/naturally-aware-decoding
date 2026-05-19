@@ -240,23 +240,27 @@ class Segmenter:
             "completion_mask": completion_mask
         }
     
-    def get_batch(self, prompt: str | None = None, completions: List[str] | None = None, lang: str | None = None, samples: List[List[dict]] | List[tuple[dict, dict]] | None = None):
-        if samples is None:
-            samples = self.preprocess_batch(prompt, completions, lang)
-        elif not isinstance(samples[0], tuple):
-            samples = [self.prepare_sample(sample) for sample in samples]
-        forward_batch, backward_batch = [], []
-        for sample in samples:
-            forward_batch.append(sample[0])
-            backward_batch.append(sample[1])
+    def get_batch(self, prompt: str | None = None, completions: List[str] | None = None, lang: str | None = None, samples: List[List[dict]] | List[tuple[dict, dict]] | tuple[list, list] | None = None):
+        if isinstance(samples, tuple):
+            forward_batch, backward_batch = samples
+        else:
+            if samples is None:
+                samples = self.preprocess_batch(prompt, completions, lang)
+            elif not isinstance(samples[0], tuple):
+                samples = [self.prepare_sample(sample) for sample in samples]
+            forward_batch, backward_batch = [], []
+            for sample in samples:
+                forward_batch.append(sample[0])
+                backward_batch.append(sample[1])
+                
         forward_batch = self.collate_fn(forward_batch)
         backward_batch = self.collate_fn(backward_batch)
         return forward_batch, backward_batch
 
-    def compute(self, prompts: List[str] | None = None, completions: List[List[str]] | None = None, lang: str | None = None, batch: List[List[dict]] | None = None):
+    def compute(self, prompts: List[str] | None = None, completions: List[List[str]] | None = None, lang: str | None = None, batch: List[List[dict]] | List[tuple[dict, dict]] | tuple[list, list] | None = None):
         masks = []
         if batch:
-            forward_batch, backward_batch = self.get_batch(batch)
+            forward_batch, backward_batch = self.get_batch(samples=batch)
             outputs = self.model_forward(forward_batch, backward_batch)
             seg_masks = [{"segment_mask": seg_mask} for seg_mask in self.compute_segment(**outputs)]
             return seg_masks

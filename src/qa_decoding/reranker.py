@@ -161,11 +161,17 @@ class TranslationeseReranker:
     def _score(self, src: str, mts: List[str], lang: str):
         c_mask = None
         seg_mask = None
-        samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
         if self.granularity == 'segment':
-            seg_mask = self.segmenter.compute(batch=samples)
-            for sample, mask in zip(samples, mask):
+            forward_batch, backward_batch = [], []
+            _samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
+            for sample in _samples:
+                forward_batch.append(sample[0])
+                backward_batch.append(sample[1])
+            seg_mask = self.segmenter.compute(batch=(forward_batch, backward_batch))
+            samples = forward_batch
+            for sample, mask in zip(samples, seg_mask):
                 sample.update(mask)
+        samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
         samples = self.collate_fn(samples)
         log_lklh_positive = self.compute_positive(samples)
         log_lklh_negative = self.compute_negative(samples)
@@ -230,43 +236,15 @@ class TranslationeseReranker:
             results.append(res)
         return results
 
-    def _rerank_loop_segment(self, srcs: List[str], mts: List[List[str]], lang: str, return_score: bool = False, normalise_scores: bool = False, seg_masks: list[torch.Tensor] | None = None):
-        results = []
-        for src, mt, seg_mask in tqdm(zip(srcs, mts, seg_masks), total=len(srcs), desc="Reranking..."):
-            rewards = self._score(src, mt, code2name[lang], seg_mask)
-            best = rewards.argmax().item()
-            res = {
-                "src": src,
-                "mt": mt[best],
-            }
 
-            if normalise_scores:
-                rewards = rewards.sigmoid()
-
-            if return_score:
-                score = rewards[best].item()
-                res.update({"score": score})
-            results.append(res)
-        return results
-
-    def rerank(self, srcs: List[str], mts: List[List[str]], lang: str, return_score: bool = False, normalise_scores: bool = False, seg_masks: list[torch.Tensor] | None = None):
-        if self.granularity == 'segment':
-            results = self._rerank_loop_segment(
-                srcs,
-                mts,
-                lang=lang,
-                return_score=return_score,
-                normalise_scores=normalise_scores,
-                seg_masks=seg_masks
-            )
-        else:
-            results = self._rerank_loop(
-                srcs,
-                mts,
-                lang=lang,
-                return_score=return_score,
-                normalise_scores=normalise_scores
-            )
+    def rerank(self, srcs: List[str], mts: List[List[str]], lang: str, return_score: bool = False, normalise_scores: bool = False):
+        results = self._rerank_loop(
+            srcs,
+            mts,
+            lang=lang,
+            return_score=return_score,
+            normalise_scores=normalise_scores
+        )
         return results
     
 class CometReranker:
