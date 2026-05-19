@@ -31,7 +31,7 @@ class Segmenter:
     def I(self, logits: torch.Tensor, labels: torch.Tensor):
         return - logits.log_softmax(-1).gather(-1, labels.unsqueeze(-1)).squeeze(-1)
 
-    def tau(self, tensors: torch.Tensor):
+    def tau(self, tensors: torch.Tensor, c_masks: torch.Tensor):
         maxima_masks = []
         minima_masks = []
         for tensor in tensors:
@@ -52,8 +52,8 @@ class Segmenter:
         maxima_masks = torch.stack(maxima_masks)
         minima_masks = torch.stack(minima_masks)
 
-        t_all = tensors.mean(dim=-1).unsqueeze(-1)
-        t_max = tensors.masked_fill(~maxima_masks, 0).mean(dim=-1).unsqueeze(-1)
+        t_all = tensors.unsqueeze(-1).sum(dim=1) / c_masks.dum(dim=1)
+        t_max = tensors.masked_fill(~maxima_masks, 0).unsqueeze(-1).sum(dim=1) / c_masks.sum(dim=1)
         return t_max, t_all, maxima_masks, minima_masks
 
     def get_bs(self, tensor: torch.Tensor):
