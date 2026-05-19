@@ -58,7 +58,7 @@ if __name__ == "__main__":
             quantization="bitsandbytes",
             gpu_memory_utilization=0.85 if args.segment_level else 0.92,
             dtype="bfloat16",
-            distributed_executer_backend="mp",
+            distributed_executor_backend="mp",
         )
 
         dataset = dataset_loader(tokenizer=model.get_tokenizer())
