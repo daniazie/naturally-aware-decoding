@@ -1,13 +1,13 @@
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, HfArgumentParser, BitsAndBytesConfig, set_seed
 from datasets import Dataset
-from typing import List, Dict
+from typing import List, Dict, Literal
 
 from vllm import LLM, SamplingParams
 from tqdm import tqdm
 import torch
 import gc
 
-from reranker import TranslationeseReranker
+from reranker import TranslationeseReranker, CometReranker, Reranker
 from segmenter import Segmenter
 torch.cuda.empty_cache()
 gc.collect()
@@ -20,14 +20,25 @@ def hf_pipeline(
     batch_size: int = 4,
     device_map: str = "auto",
     best_of: int = 8,
+    reranker_type: Literal["natural", "comet", "combined"] | None = None,
+    granularity: Literal['token', 'segment', 'sequence'] | None = None,
     reranker_args: dict | None = None,
     generation_kwargs: dict | None = None,
     enable_tqdm: bool = True
 ):
-    reranker = TranslationeseReranker(
-        model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-        device_map=device_map
-    )
+    if reranker_type == "natural":
+        reranker = TranslationeseReranker(
+            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            granularity=granularity,
+            device_map=device_map
+        )
+    elif reranker_type == "comet":
+        reranker = CometReranker()
+    elif reranker_type == "combined":
+        reranker = Reranker(
+            nat_eval_model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            hf_kwargs={"device_map": device_map},
+        )
 
     if isinstance(texts, list):
         texts = Dataset.from_list(texts)
@@ -80,13 +91,24 @@ def vllm_pipeline(
     batch_size: int = 4,
     device_map: str = "auto",
     sampling_params: SamplingParams | None = None,
+    reranker_type: Literal["natural", "comet", "combined"] | None = None,
+    granularity: Literal['token', 'segment', 'sequence'] | None = None,
     reranker_args: dict | None = None,
     enable_tqdm: bool = True
 ):
-    reranker = TranslationeseReranker(
-        model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-        device_map=device_map
-    )
+    if reranker_type == "natural":
+        reranker = TranslationeseReranker(
+            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            granularity=granularity,
+            device_map=device_map
+        )
+    elif reranker_type == "comet":
+        reranker = CometReranker()
+    elif reranker_type == "combined":
+        reranker = Reranker(
+            nat_eval_model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            hf_kwargs={"device_map": device_map},
+        )
 
     if isinstance(texts, list):
         texts = Dataset.from_list(texts)
@@ -98,6 +120,13 @@ def vllm_pipeline(
     preds = []
     if enable_tqdm:
         texts = tqdm(texts, desc="Generating...")
+
+    if reranker_type is None:
+        for i, batch in enumerate(texts):
+            outputs = model.generate(batch['prompt'], sampling_params=sampling_params)
+            mts = [output.outputs[0].text for output in outputs]
+            preds += mts
+        return preds
 
     for i, batch in enumerate(texts):
         outputs = model.generate(batch['prompt'], sampling_params=sampling_params)
@@ -111,45 +140,3 @@ def vllm_pipeline(
         preds += best
     return preds
 
-def seg_pipeline(
-    model: LLM,
-    texts: List[dict] | Dict[str, List[str]] | Dataset,
-    segmenter: str | Segmenter | None = None,
-    batch_size: int = 4,
-    device_map: str = "auto",
-    sampling_params: SamplingParams | None = None,
-    reranker_args: dict | None = None,
-    enable_tqdm: bool = True
-):
-    reranker = TranslationeseReranker(
-        model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-        device_map=device_map
-    )
-
-    if segmenter is None:
-        segmenter = Segmenter(model=reranker.positive_model, tokenizer=reranker.tokenizer)
-    elif isinstance(segmenter, str):
-        segmenter = Segmenter(model=segmenter)
-
-    if isinstance(texts, list):
-        texts = Dataset.from_list(texts)
-    elif isinstance(texts, dict):
-        texts = Dataset.from_dict(texts)
-    
-    texts = texts.batch(batch_size)
-
-    preds = []
-    if enable_tqdm:
-        texts = tqdm(texts, desc="Generating...")
-
-    for i, batch in enumerate(texts):
-        outputs = model.generate(batch['prompt'], sampling_params=sampling_params)
-        mts = [[seq.text for seq in output.outputs] for output in outputs]
-        seg_masks = segmenter.compute(batch['src'], mts, reranker_args['lang'])
-        best = reranker.rerank(batch['src'], mts, seg_masks=seg_masks, **reranker_args)
-        if i % 4 == 0:
-            gc.collect()
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
-        preds += best
-    return preds
