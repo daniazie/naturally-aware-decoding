@@ -47,7 +47,7 @@ class TranslationeseReranker:
             self.segmenter = Segmenter(positive_model, self.tokenizer)
         else:
             self.segmenter = segmenter
-        self.compute_positive = partial(self.compute_logps, model=self.positive_model)
+        self.compute_positive = partial(self.compute_logps, model=positive_model)
         self.compute_negative = partial(self.compute_logps, model=negative_model)
 
     def compute_logps(self, example, model: PreTrainedModel):
