@@ -34,8 +34,11 @@ class CometConfig:
 
 @dataclass
 class RerankerConfig:
-    natural_eval_model_dir: str
-    comet_model: str = "Unbabel/wmt23-cometkiwi-da-xl"
+    w_nat: float = 1.0
+    w_comet: float = 1.0
+    return_score: bool = False
+    return_nat: bool = False
+    return_comet: bool = False
 
 class TranslationeseReranker:
     def __init__(self, model_dir: str | os.PathLike, tokenizer: str | os.PathLike | None = None, segmenter: Segmenter | None = None, granularity: Literal['token', 'sequence', 'segment'] = 'token', metric_type: Literal['logps', 'entropy'] = 'logps', **model_kwargs):

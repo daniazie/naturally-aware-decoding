@@ -47,9 +47,10 @@ if __name__ == "__main__":
         elif reranker_type == 'combined':
             reranker_config = RerankerConfig
         hf_parser = HfArgumentParser([gen_config, reranker_config])
+        generation_kwargs, rerank_args = hf_parser.parse_args_into_dataclasses(args=kwargs)
     else:
         hf_parser = HfArgumentParser(gen_config)
-    generation_kwargs, rerank_args = hf_parser.parse_args_into_dataclasses(args=kwargs)
+        generation_kwargs = hf_parser.parse_args_into_dataclasses(args=kwargs)
 
     dataset_loader = partial(load_dataset, args.data_path, args.tgt_lang, convert_chat_template=args.vllm)
     if args.vllm:
