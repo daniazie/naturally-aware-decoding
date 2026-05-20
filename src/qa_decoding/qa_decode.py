@@ -108,6 +108,7 @@ def vllm_pipeline(
         reranker = Reranker(
             nat_eval_model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
             hf_kwargs={"device_map": device_map},
+            granularity=granularity
         )
 
     if isinstance(texts, list):

@@ -1,6 +1,8 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 from dataclasses import dataclass
 from datasets import Dataset
+from datasets import load_dataset as load_ds
+from pathlib import Path
 import torch
 import numpy as np
 
@@ -28,16 +30,44 @@ code2name = {
     "kor": "Korean",
 }
 
-def load_dataset(data_path="NTREX/NTREX-128", tgt_lang: str = "zho", convert_chat_template: bool = False, tokenizer: PreTrainedTokenizerBase | None = None):
-    with open(f"{data_path}/newstest2019-src.eng.txt", "r") as file:
-        src = file.readlines()
-    if tgt_lang == "zho":
-        lang_code = tgt_lang + "-CN"
+flores_codes = {
+    "zsm_Latn": "Malay",
+    "kor_Latn": "Korean",
+    "cmn_Hans": "Chinese"
+}
+
+flores_names = {
+    v: k
+    for v, k in flores_codes.items()
+}
+
+name2code = {
+    v: k 
+    for v, k in code2name.items()
+}
+
+def load_dataset(data_path="NTREX/NTREX-128", tgt_lang: str = "zho", convert_chat_template: bool = False, split: str | None = None, tokenizer: PreTrainedTokenizerBase | None = None):
+    if Path(data_path).exists():
+        with open(f"{data_path}/newstest2019-src.eng.txt", "r") as file:
+            src = file.readlines()
+        if tgt_lang == "zho":
+            lang_code = tgt_lang + "-CN"
+        else:
+            lang_code = tgt_lang
+        with open(f"{data_path}/newstest2019-ref.{lang_code}.txt", "r", encoding='utf-8') as file:
+            ref = file.readlines()
+        dataset =  Dataset.from_dict({"src": src, "ref": ref})
     else:
-        lang_code = tgt_lang
-    with open(f"{data_path}/newstest2019-ref.{lang_code}.txt", "r", encoding='utf-8') as file:
-        ref = file.readlines()
-    dataset =  Dataset.from_dict({"src": src, "ref": ref})
+        src_ds = load_ds(data_path, "eng_Latn", split=split)
+        lang_code = flores_codes[flores_names[name2code[tgt_lang]]]
+        ref_ds = load_ds(data_path, lang_code, split=split)
+        data = []
+        for src, ref in zip(src_ds, ref_ds):
+            data.append({
+                "src": src['text'],
+                "ref": ref['text']
+            })
+        dataset = Dataset.from_list(data)
     dataset = dataset.map(format_messages, fn_kwargs={"lang": code2name[tgt_lang]}, batched=True)
     if convert_chat_template:
         dataset = dataset.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer}, batched=True)

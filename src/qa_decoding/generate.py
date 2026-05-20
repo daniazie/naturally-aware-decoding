@@ -7,6 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, HfArgumentParser, 
 from functools import partial
 from tqdm import tqdm
 import torch
+
 import argparse
 import json
 import os
@@ -56,7 +57,7 @@ if __name__ == "__main__":
             args.model,
             seed=42,
             quantization="bitsandbytes",
-            gpu_memory_utilization=0.7 if args.granularity == 'segment' or reranker_type != 'natural' else 0.92,
+            gpu_memory_utilization=0.7849 if args.granularity == 'segment' or reranker_type != 'natural' else 0.92,
             dtype="bfloat16",
             distributed_executor_backend="mp",
             cpu_offload_gb=4,

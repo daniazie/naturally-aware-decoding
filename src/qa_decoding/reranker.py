@@ -38,7 +38,7 @@ class RerankerConfig:
     comet_model: str = "Unbabel/wmt23-cometkiwi-da-xl"
 
 class TranslationeseReranker:
-    def __init__(self, model_dir: str | os.PathLike, tokenizer: str | os.PathLike | None = None, segmenter: Segmenter | None = None, granularity: Literal['token', 'sequence', 'segment'] = 'token', **model_kwargs):
+    def __init__(self, model_dir: str | os.PathLike, tokenizer: str | os.PathLike | None = None, segmenter: Segmenter | None = None, granularity: Literal['token', 'sequence', 'segment'] = 'token', metric_type: Literal['logps', 'entropy'] = 'logps', **model_kwargs):
         positive_model = AutoModelForCausalLM.from_pretrained(f"{model_dir}/negative", **model_kwargs)
         negative_model = AutoModelForCausalLM.from_pretrained(f"{model_dir}/positive", **model_kwargs)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer if tokenizer is not None else f"{model_dir}/negative")
@@ -47,8 +47,22 @@ class TranslationeseReranker:
             self.segmenter = Segmenter(positive_model, self.tokenizer)
         else:
             self.segmenter = segmenter
-        self.compute_positive = partial(self.compute_logps, model=positive_model)
-        self.compute_negative = partial(self.compute_logps, model=negative_model)
+        if metric_type == 'logps':
+            self.compute_positive = partial(self.compute_logps, model=positive_model)
+            self.compute_negative = partial(self.compute_logps, model=negative_model)
+        elif metric_type == 'entropy':
+            self.compute_positive = partial(self.compute_entropy, model=positive_model)
+            self.compute_negative = partial(self.compute_entropy, model=negative_model)
+
+    @torch.no_grad()
+    def compute_logits(self, inputs, model: PreTrainedModel):
+        outputs = model(**inputs)
+        logits: torch.Tensor = outputs.logits[:, :-1].cpu()
+        inputs = {
+            k: v.cpu()
+            for k, v in inputs.items()
+        }
+        return logits
 
     def compute_logps(self, example, model: PreTrainedModel):
         _exclude_keys = {"completion_mask", "segment_mask"}
@@ -57,10 +71,9 @@ class TranslationeseReranker:
             for k, v in example.items()
             if not k in _exclude_keys
         }
-        completion_mask: torch.Tensor = example["completion_mask"].clone()
-        with torch.no_grad():
-            outputs = model(**inputs)
-        logits: torch.Tensor = outputs.logits[:, :-1].cpu()
+        
+        logits = self.compute_logits(inputs=inputs, model=model)
+        completion_mask: torch.Tensor = example["completion_mask"]
         labels: torch.Tensor = inputs['input_ids'][:, 1:].cpu()
         completion_mask = completion_mask[:, 1:].bool()
         
@@ -71,7 +84,23 @@ class TranslationeseReranker:
         if self.granularity == "sequence":
             logps = logps.sum(dim=1) / completion_mask.sum(dim=1)
 
-        return logps.cpu()
+        return logps
+    
+    def compute_entropy(self, example, model: PreTrainedModel):
+        _exclude_keys = {"completion_mask", "segment_mask"}
+        inputs = {
+            k: v.to(model.device)
+            for k, v in example.items()
+            if not k in _exclude_keys
+        }
+        
+        logits = self.compute_logits(inputs=inputs, model=model)
+        completion_mask: torch.Tensor = example["completion_mask"].clone()
+        completion_mask = completion_mask[:, 1:].bool()
+
+        entropy = - (logits.softmax(dim=-1) * logits.log_softmax(dim=-1)).sum(dim=-1)
+        entropy = entropy.masked_fill(~completion_mask, 0)
+        return entropy
     
     def tokenize_fn(self, text, tokenizer: PreTrainedTokenizerBase, **kwargs):
         return tokenizer.apply_chat_template(
@@ -147,19 +176,57 @@ class TranslationeseReranker:
                     rewards.append(reward)
 
         return torch.stack(rewards).mean()
+    
+    def per_segment_logps(self, pos_tensor: torch.Tensor, neg_tensor: torch.Tensor, seg_mask: torch.Tensor):
+        rewards = []
+        segment_pos = []
+        segment_neg = []
+        for i, t in enumerate(seg_mask):
+            if t < 0:
+                continue
+            if t:
+                segment_pos.append(pos_tensor[i])
+                segment_neg.append(neg_tensor[i])
+            if t == 0:
+                if segment_pos and segment_neg:
+                    logps_pos = torch.tensor(segment_pos).sum(dim=-1)
+                    logps_neg = torch.tensor(segment_neg).sum(dim=-1)
+                    logps_ratios = logps_pos - logps_neg
+                    rewards.append(logps_ratios)
+                    segment_pos = [pos_tensor[i]]
+                    segment_neg = [neg_tensor[i]]
+            if not i == len(seg_mask) - 1:
+                if seg_mask[i+1] < 0:
+                    logps_pos = torch.tensor(segment_pos).sum(dim=-1)
+                    logps_neg = torch.tensor(segment_neg).sum(dim=-1)
+                    logps_ratios = logps_pos - logps_neg
+                    rewards.append(logps_ratios)
+            else:
+                if t > 0:
+                    logps_pos = torch.tensor(segment_pos).sum(dim=-1)
+                    logps_neg = torch.tensor(segment_neg).sum(dim=-1)
+                    logps_ratios = logps_pos - logps_neg
+                    rewards.append(logps_ratios)
+        return torch.stack(rewards).mean()
 
-    def compute_rewards(self, log_lklh_positive: torch.Tensor, log_lklh_negative: torch.Tensor, c_mask: torch.Tensor | None = None, seg_masks: torch.Tensor | None = None):
-        logps_ratios = log_lklh_positive - log_lklh_negative
-        if self.granularity == 'token':
-            logps_ratios = logps_ratios.sum(dim=1) / c_mask.sum(dim=1)
-        if self.granularity == "segment":
+    def compute_rewards(self, log_lklh_positive: torch.Tensor, log_lklh_negative: torch.Tensor, c_masks: torch.Tensor | None = None, seg_masks: torch.Tensor | None = None):
+        if self.granularity == 'segment':
             seg_masks = seg_masks[:, 1:]
-            per_segment_logps_ratios = [self.compute_per_segment_rewards(ratio, seg_mask) for ratio, seg_mask in zip(logps_ratios, seg_masks)]
-            logps_ratios = torch.stack(per_segment_logps_ratios)
-        return logps_ratios
+            if not c_masks.shape == log_lklh_positive.shape:
+                c_masks = c_masks[:, 1:]
+            per_segment_rewards = [self.per_segment_logps(logps_pos, logps_neg, seg_mask) for logps_pos, logps_neg, seg_mask in zip(log_lklh_positive, log_lklh_negative, seg_masks)]
+            rewards = torch.stack(per_segment_rewards)
+            return rewards
+        rewards = log_lklh_positive - log_lklh_negative
+        if self.granularity == 'token':
+            rewards = rewards.sum(dim=1) / c_masks.sum(dim=1)
+        # if self.granularity == "segment":
+        #     seg_masks = seg_masks[:, 1:]
+        #     per_segment_logps_ratios = [self.compute_per_segment_rewards(ratio, seg_mask) for ratio, seg_mask in zip(logps_ratios, seg_masks)]
+        #     logps_ratios = torch.stack(per_segment_logps_ratios)
+        return rewards
 
     def _score(self, src: str, mts: List[str], lang: str):
-        c_mask = None
         seg_mask = None
         if self.granularity == 'segment':
             forward_batch, backward_batch = [], []
@@ -171,14 +238,14 @@ class TranslationeseReranker:
             samples = forward_batch
             for sample, mask in zip(samples, seg_mask):
                 sample.update(mask)
-        samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
+        else:
+            samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
         samples = self.collate_fn(samples)
         log_lklh_positive = self.compute_positive(samples)
         log_lklh_negative = self.compute_negative(samples)
 
-        if self.granularity == 'token':
-            c_mask = samples['completion_mask']
-        elif self.granularity == 'segment':
+        c_mask = samples['completion_mask']
+        if self.granularity == 'segment':
             seg_mask = samples['segment_mask']
 
         rewards = self.compute_rewards(log_lklh_positive, log_lklh_negative, c_mask, seg_mask)
