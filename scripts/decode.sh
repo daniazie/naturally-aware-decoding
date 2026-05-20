@@ -1,8 +1,8 @@
 reranker_type=$1
 granularities=(
-    "segment"
     "token"
     "sequence"
+    "segment"
 )
 
 if [[ $reranker_type == "natural" ]]; then
@@ -22,7 +22,7 @@ if [[ $reranker_type == "natural" ]]; then
             --normalise_scores true \
             --max_tokens 512 \
             --vllm \
-            --batch_size 8 \
+            --batch_size 16 \
             --reranker_type ${reranker_type}
         uv run --extra cu130 python src/qa_decoding/generate.py \
             --model Qwen/Qwen3-4B \
@@ -39,7 +39,7 @@ if [[ $reranker_type == "natural" ]]; then
             --normalise_scores true \
             --max_tokens 512 \
             --vllm \
-            --batch_size 8 \
+            --batch_size 16 \
             --reranker_type ${reranker_type}
         uv run --extra cu130 python src/qa_decoding/generate.py \
             --model Qwen/Qwen3-4B \
@@ -56,7 +56,7 @@ if [[ $reranker_type == "natural" ]]; then
             --normalise_scores true \
             --max_tokens 512 \
             --vllm \
-            --batch_size 8 \
+            --batch_size 16 \
             --reranker_type ${reranker_type}
     done
 elif [[ $reranker_type == "combined" ]]; then
@@ -77,7 +77,7 @@ elif [[ $reranker_type == "combined" ]]; then
             --return_comet true \
             --max_tokens 512 \
             --vllm \
-            --batch_size 8 \
+            --batch_size 16 \
             --reranker_type ${reranker_type}
         uv run --extra cu130 python src/qa_decoding/generate.py \
             --model Qwen/Qwen3-4B \
@@ -95,7 +95,7 @@ elif [[ $reranker_type == "combined" ]]; then
             --return_comet true \
             --max_tokens 512 \
             --vllm \
-            --batch_size 8 \
+            --batch_size 16 \
             --reranker_type ${reranker_type}
         uv run --extra cu130 python src/qa_decoding/generate.py \
             --model Qwen/Qwen3-4B \
@@ -113,7 +113,7 @@ elif [[ $reranker_type == "combined" ]]; then
             --return_comet true \
             --max_tokens 512 \
             --vllm \
-            --batch_size 8 \
+            --batch_size 16 \
             --reranker_type ${reranker_type}
     done
 elif [[ $reranker_type == "comet" ]]; then
@@ -129,7 +129,7 @@ elif [[ $reranker_type == "comet" ]]; then
         --return_score true \
         --max_tokens 512 \
         --vllm \
-        --batch_size 8 \
+        --batch_size 16 \
         --reranker_type ${reranker_type}
     uv run --extra cu130 python src/qa_decoding/generate.py \
         --model Qwen/Qwen3-4B \
@@ -143,7 +143,7 @@ elif [[ $reranker_type == "comet" ]]; then
         --return_score true \
         --max_tokens 512 \
         --vllm \
-        --batch_size 8 \
+        --batch_size 16 \
         --reranker_type ${reranker_type}
     uv run --extra cu130 python src/qa_decoding/generate.py \
         --model Qwen/Qwen3-4B \
@@ -157,7 +157,7 @@ elif [[ $reranker_type == "comet" ]]; then
         --return_score true \
         --max_tokens 512 \
         --vllm \
-        --batch_size 8 \
+        --batch_size 16 \
         --reranker_type ${reranker_type}
 else
     uv run --extra cu130 python src/qa_decoding/generate.py \
@@ -171,7 +171,7 @@ else
         --top_p 0.90 \
         --max_tokens 512 \
         --vllm \
-        --batch_size 8 \
+        --batch_size 16 \
         --reranker_type ${reranker_type}
     uv run --extra cu130 python src/qa_decoding/generate.py \
         --model Qwen/Qwen3-4B \
@@ -184,7 +184,7 @@ else
         --top_p 0.90 \
         --max_tokens 512 \
         --vllm \
-        --batch_size 8 \
+        --batch_size 16 \
         --reranker_type ${reranker_type}
     uv run --extra cu130 python src/qa_decoding/generate.py \
         --model Qwen/Qwen3-4B \
@@ -197,6 +197,6 @@ else
         --top_p 0.90 \
         --max_tokens 512 \
         --vllm \
-        --batch_size 8 \
+        --batch_size 16 \
         --reranker_type ${reranker_type}
 fi

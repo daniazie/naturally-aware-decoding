@@ -94,7 +94,6 @@ def vllm_pipeline(
     reranker_type: Literal["natural", "comet", "combined"] | None = None,
     granularity: Literal['token', 'segment', 'sequence'] | None = None,
     reranker_args: dict | None = None,
-    enable_tqdm: bool = True
 ):
     if reranker_type == "natural":
         reranker = TranslationeseReranker(
@@ -106,7 +105,7 @@ def vllm_pipeline(
         reranker = CometReranker()
     elif reranker_type == "combined":
         reranker = Reranker(
-            nat_eval_model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
             hf_kwargs={"device_map": device_map},
             granularity=granularity
         )
@@ -119,18 +118,17 @@ def vllm_pipeline(
     texts = texts.batch(batch_size)
 
     preds = []
-    if enable_tqdm:
-        texts = tqdm(texts, desc="Generating...")
+
 
     if reranker_type is None:
-        for i, batch in enumerate(texts):
-            outputs = model.generate(batch['prompt'], sampling_params=sampling_params)
+        for i, batch in enumerate(tqdm(texts, total=len(texts), desc="Generating...")):
+            outputs = model.generate(batch['prompt'], sampling_params=sampling_params, use_tqdm=False)
             mts = [output.outputs[0].text for output in outputs]
             preds += mts
         return preds
 
-    for i, batch in enumerate(texts):
-        outputs = model.generate(batch['prompt'], sampling_params=sampling_params)
+    for i, batch in enumerate(tqdm(texts, total=len(texts), desc="Generating...")):
+        outputs = model.generate(batch['prompt'], sampling_params=sampling_params, use_tqdm=False)
         mts = [[seq.text for seq in output.outputs] for output in outputs]
 
         best = reranker.rerank(batch['src'], mts, **reranker_args)

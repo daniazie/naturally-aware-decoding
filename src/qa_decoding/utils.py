@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datasets import Dataset
 from datasets import load_dataset as load_ds
 from pathlib import Path
+import random
 import torch
 import numpy as np
 
@@ -47,16 +48,24 @@ name2code = {
 }
 
 def load_dataset(data_path="NTREX/NTREX-128", tgt_lang: str = "zho", convert_chat_template: bool = False, split: str | None = None, tokenizer: PreTrainedTokenizerBase | None = None):
+    random.seed(42)
     if Path(data_path).exists():
         with open(f"{data_path}/newstest2019-src.eng.txt", "r") as file:
-            src = file.readlines()
+            srcs = file.readlines()
         if tgt_lang == "zho":
             lang_code = tgt_lang + "-CN"
         else:
             lang_code = tgt_lang
         with open(f"{data_path}/newstest2019-ref.{lang_code}.txt", "r", encoding='utf-8') as file:
-            ref = file.readlines()
-        dataset =  Dataset.from_dict({"src": src, "ref": ref})
+            refs = file.readlines()
+        data = []
+        for src, ref in zip(srcs, refs):
+            data.append({
+                "src": src,
+                "ref": ref
+            })
+        data = random.sample(data, 100)
+        dataset =  Dataset.from_list(data)
     else:
         src_ds = load_ds(data_path, "eng_Latn", split=split)
         lang_code = flores_codes[flores_names[name2code[tgt_lang]]]

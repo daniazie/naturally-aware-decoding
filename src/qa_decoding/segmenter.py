@@ -52,7 +52,7 @@ class Segmenter:
         maxima_masks = torch.stack(maxima_masks)
         minima_masks = torch.stack(minima_masks)
 
-        t_all = tensors.sum(dim=1) / c_masks.sum(dim=1)
+        t_all = tensors.masked_fill(~c_masks, 0).sum(dim=1) / c_masks.sum(dim=1)
         t_max = tensors.masked_fill(~maxima_masks, 0).sum(dim=1) / c_masks.sum(dim=1)
         t_all = t_all.unsqueeze(-1)
         t_max = t_max.unsqueeze(-1)
@@ -82,9 +82,9 @@ class Segmenter:
         for i, t in enumerate(mask):
             if t < 0:
                 continue
-            if t:
-                segment.append(tensor[i])
             if t == 0:
+                segment.append(tensor[i])
+            if t == 1:
                 if segment:
                     segments.append(segment)
                 segment = [tensor[i]]
@@ -92,75 +92,46 @@ class Segmenter:
                 if mask[i+1] < 0:
                     segments.append(segment)
             else:
-                if t > 0:
+                if t >= 0:
                     segments.append(segment)
 
         return segments
 
     @torch.no_grad()
-    def model_forward(self, forward_batch, backward_batch):
+    def model_forward(self, batch):
         _exclude_keys = {"completion_mask"}
         forward_inputs = {
             k: v.to(self.model.device)
-            for k, v in forward_batch.items()
+            for k, v in batch.items()
             if not k in _exclude_keys
         }
 
-        backward_inputs = {
-            k: v.to(self.model.device)
-            for k, v in backward_batch.items()
-            if not k in _exclude_keys
-        }
-
-        forward_logits: torch.Tensor = self.model(**forward_inputs).logits[:, :-1].cpu()
-        backward_logits: torch.Tensor = self.model(**backward_inputs).logits[:, 1:].cpu()
-
-        forward_labels: torch.Tensor = forward_inputs['input_ids'][:, 1:].cpu()
-        backward_labels: torch.Tensor = backward_inputs['input_ids'][:, :-1].cpu()
-
-        forward_mask: torch.Tensor = forward_batch['completion_mask'][:, 1:].bool().cpu()
-        backward_mask: torch.Tensor = backward_batch['completion_mask'][:, :-1].bool().cpu()
+        logits: torch.Tensor = self.model(**forward_inputs).logits[:, :-1].cpu()
+        labels: torch.Tensor = forward_inputs['input_ids'][:, 1:].cpu()
+        completion_mask: torch.Tensor = batch['completion_mask'][:, 1:].bool().cpu()
 
 
         forward_inputs = {
             k: v.cpu()
-            for k, v in forward_batch.items()
-            if not k in _exclude_keys
-        }
-
-        backward_inputs = {
-            k: v.cpu()
-            for k, v in backward_batch.items()
+            for k, v in batch.items()
             if not k in _exclude_keys
         }
 
         outputs = {
-            "forward_logits": forward_logits,
-            "forward_labels": forward_labels,
-            "forward_completion_mask": forward_mask,
-            "backward_logits": backward_logits,
-            "backward_labels": backward_labels,
-            "backward_completion_mask": backward_mask
+            "logits": logits,
+            "labels": labels,
+            "completion_mask": completion_mask,
         }
 
         return outputs
-    
-    def flip(self, tensors: torch.Tensor):
-        flipped = []
-        for tensor in tensors:
-            flipped.append(torch.tensor(tensor.tolist()[::-1]))
-        return torch.stack(flipped)
 
-    def compute_segment(self, forward_logits: torch.Tensor, backward_logits: torch.Tensor, forward_labels: torch.Tensor, backward_labels: torch.Tensor, forward_completion_mask: torch.Tensor, backward_completion_mask: torch.Tensor):
-        H_forward = self.H(forward_logits).masked_fill(~forward_completion_mask, 0)
-        I_forward = self.I(forward_logits, forward_labels).masked_fill(~forward_completion_mask, 0)
-        H_backward = self.flip(self.H(backward_logits)).masked_fill(~backward_completion_mask, 0)
-        I_backward = self.flip(self.I(backward_logits, backward_labels)).masked_fill(~backward_completion_mask, 0)
+    def compute_segment(self, logits: torch.Tensor, labels: torch.Tensor, completion_mask: torch.Tensor):
+        entropy = self.H(logits).masked_fill(~completion_mask, 0)
+        surprisal = self.I(logits, labels).masked_fill(~completion_mask, 0)
 
-        end_new, start, forward_bp, forward_obg = self.get_boundaries(H_forward, I_forward, forward_completion_mask)
-        start_new, end, backward_bp, backward_obg = self.get_boundaries(H_backward, I_backward, backward_completion_mask)
+        end, start, bp, obg = self.get_boundaries(entropy, surprisal, completion_mask)
 
-        masks = (((start_new | backward_obg) | (end | backward_bp)) | ((start | forward_bp) | (end_new | forward_obg))).int().masked_fill(~forward_completion_mask, -100)
+        masks = (((start | bp) & (end & obg))).int().masked_fill(~completion_mask, -100) 
         return masks
 
     def format_messages(self, prompt: str, completion: str, lang: str,):
@@ -189,8 +160,7 @@ class Segmenter:
         return data
     
     def prepare_sample(self, sample):
-        forward_input = {}
-        backward_input = {}
+        output = {}
         prompt_ids = self.tokenize_fn(
             sample['prompt'],
             tokenizer=self.tokenizer,
@@ -206,15 +176,11 @@ class Segmenter:
         attention_mask = prompt_completion_processed['attention_mask']
         completion_mask = [0] * len(prompt_ids) + [1] * (len(prompt_completion_ids) - len(prompt_ids))
 
-        forward_input['input_ids'] = torch.tensor(prompt_completion_ids)
-        forward_input['attention_mask'] = torch.tensor(attention_mask)
-        forward_input['completion_mask'] = torch.tensor(completion_mask)
+        output['input_ids'] = torch.tensor(prompt_completion_ids)
+        output['attention_mask'] = torch.tensor(attention_mask)
+        output['completion_mask'] = torch.tensor(completion_mask)
 
-        backward_input['input_ids'] = torch.tensor(prompt_completion_ids[::-1])
-        backward_input['attention_mask'] = torch.tensor(attention_mask[::-1])
-        backward_input['completion_mask'] = torch.tensor(completion_mask[::-1])
-
-        return forward_input, backward_input
+        return output
 
     def collate_fn(self, examples):
         input_ids = [example['input_ids'] for example in examples]
@@ -240,33 +206,22 @@ class Segmenter:
             "completion_mask": completion_mask
         }
     
-    def get_batch(self, prompt: str | None = None, completions: List[str] | None = None, lang: str | None = None, samples: List[List[dict]] | List[tuple[dict, dict]] | tuple[list, list] | None = None):
-        if isinstance(samples, tuple):
-            forward_batch, backward_batch = samples
-        else:
-            if samples is None:
-                samples = self.preprocess_batch(prompt, completions, lang)
-            elif not isinstance(samples[0], tuple):
-                samples = [self.prepare_sample(sample) for sample in samples]
-            forward_batch, backward_batch = [], []
-            for sample in samples:
-                forward_batch.append(sample[0])
-                backward_batch.append(sample[1])
-                
-        forward_batch = self.collate_fn(forward_batch)
-        backward_batch = self.collate_fn(backward_batch)
-        return forward_batch, backward_batch
+    def get_batch(self, prompt: str | None = None, completions: List[str] | None = None, lang: str | None = None, samples: List[List[dict]] | List[dict] | None = None):
+        if samples is None:
+            samples = self.preprocess_batch(prompt, completions, lang)
+        batch = self.collate_fn(samples)
+        return batch
 
     def compute(self, prompts: List[str] | None = None, completions: List[List[str]] | None = None, lang: str | None = None, batch: List[List[dict]] | List[tuple[dict, dict]] | tuple[list, list] | None = None):
         masks = []
         if batch:
-            forward_batch, backward_batch = self.get_batch(samples=batch)
-            outputs = self.model_forward(forward_batch, backward_batch)
+            batch = self.get_batch(samples=batch)
+            outputs = self.model_forward(batch)
             seg_masks = [{"segment_mask": seg_mask} for seg_mask in self.compute_segment(**outputs)]
             return seg_masks
         for prompt, completion in tqdm(zip(prompts, completions), total=len(prompts), desc="Segmenting..."):
-            forward_batch, backward_batch = self.get_batch(prompt, completion, lang)
-            outputs = self.model_forward(forward_batch, backward_batch)
+            batch = self.get_batch(prompt, completion, lang)
+            outputs = self.model_forward(batch)
             seg_masks = self.compute_segment(**outputs)
             masks.append(seg_masks)
         return masks

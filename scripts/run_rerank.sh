@@ -1,8 +1,8 @@
 reranker_type=(
+    "none"
     "natural"
     "comet"
     "combined"
-    "none"
 )
 
 for reranker in ${reranker_type[@]}; do

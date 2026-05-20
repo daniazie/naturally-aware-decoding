@@ -47,7 +47,7 @@ class TranslationeseReranker:
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer if tokenizer is not None else f"{model_dir}/negative")
         self.granularity = granularity
         if self.granularity == 'segment' and segmenter is None:
-            self.segmenter = Segmenter(positive_model, self.tokenizer)
+            self.segmenter = Segmenter("Qwen/Qwen2.5-0.5B", dtype=torch.bfloat16)
         else:
             self.segmenter = segmenter
         if metric_type == 'logps':
@@ -140,17 +140,6 @@ class TranslationeseReranker:
         attention_mask = prompt_completion_processed['attention_mask']
         completion_mask = [0] * len(prompt_ids) + [1] * (len(prompt_completion_ids) - len(prompt_ids))
 
-        if self.granularity == 'segment':
-            forward_input, backward_input = {}, {}
-            forward_input['input_ids'] = torch.tensor(prompt_completion_ids)
-            forward_input['attention_mask'] = torch.tensor(attention_mask)
-            forward_input['completion_mask'] = torch.tensor(completion_mask)
-
-            backward_input['input_ids'] = torch.tensor(prompt_completion_ids[::-1])
-            backward_input['attention_mask'] = torch.tensor(attention_mask[::-1])
-            backward_input['completion_mask'] = torch.tensor(completion_mask[::-1])
-            return forward_input, backward_input
-
         output['input_ids'] = torch.tensor(prompt_completion_ids)
         output['attention_mask'] = torch.tensor(attention_mask)
         output['completion_mask'] = torch.tensor(completion_mask)
@@ -187,10 +176,10 @@ class TranslationeseReranker:
         for i, t in enumerate(seg_mask):
             if t < 0:
                 continue
-            if t:
+            if t == 0:
                 segment_pos.append(pos_tensor[i])
                 segment_neg.append(neg_tensor[i])
-            if t == 0:
+            if t == 1:
                 if segment_pos and segment_neg:
                     logps_pos = torch.tensor(segment_pos).sum(dim=-1)
                     logps_neg = torch.tensor(segment_neg).sum(dim=-1)
@@ -223,26 +212,15 @@ class TranslationeseReranker:
         rewards = log_lklh_positive - log_lklh_negative
         if self.granularity == 'token':
             rewards = rewards.sum(dim=1) / c_masks.sum(dim=1)
-        # if self.granularity == "segment":
-        #     seg_masks = seg_masks[:, 1:]
-        #     per_segment_logps_ratios = [self.compute_per_segment_rewards(ratio, seg_mask) for ratio, seg_mask in zip(logps_ratios, seg_masks)]
-        #     logps_ratios = torch.stack(per_segment_logps_ratios)
         return rewards
 
     def _score(self, src: str, mts: List[str], lang: str):
         seg_mask = None
+        samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
         if self.granularity == 'segment':
-            forward_batch, backward_batch = [], []
-            _samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
-            for sample in _samples:
-                forward_batch.append(sample[0])
-                backward_batch.append(sample[1])
-            seg_mask = self.segmenter.compute(batch=(forward_batch, backward_batch))
-            samples = forward_batch
-            for sample, mask in zip(samples, seg_mask):
-                sample.update(mask)
-        else:
-            samples = [self.prepare_data(sample, self.tokenizer) for sample in self.preprocess_batch(src, mts, lang)]
+            seg_mask = self.segmenter.compute(batch=samples)
+            for i, sample in enumerate(samples):
+                sample.update(seg_mask[i])
         samples = self.collate_fn(samples)
         log_lklh_positive = self.compute_positive(samples)
         log_lklh_negative = self.compute_negative(samples)
@@ -356,8 +334,8 @@ class CometReranker:
         return results
     
 class Reranker:
-    def __init__(self, nat_eval_model_dir: str, hf_kwargs: dict | None, comet_model: str = "Unbabel/wmt23-cometkiwi-da-xl", comet_kwargs: dict | None = None, segmenter: Segmenter | None = None, granularity: Literal['token', 'sequence', 'segment'] = "token"):
-        self.nat_reranker = TranslationeseReranker(nat_eval_model_dir, granularity=granularity, **hf_kwargs)
+    def __init__(self, model_dir: str, hf_kwargs: dict | None, comet_model: str = "Unbabel/wmt23-cometkiwi-da-xl", comet_kwargs: dict | None = None, segmenter: Segmenter | None = None, granularity: Literal['token', 'sequence', 'segment'] = "token"):
+        self.nat_reranker = TranslationeseReranker(model_dir, granularity=granularity, **hf_kwargs)
         self.comet_reranker = CometReranker(comet_model, **comet_kwargs)
     
     def get_best(self, prompt: str, completions: List[str], scores: np.ndarray, return_score: bool = False):
