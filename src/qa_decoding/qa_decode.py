@@ -7,7 +7,7 @@ from tqdm import tqdm
 import torch
 import gc
 
-from reranker import RatioReranker, LikelihoodReranker, CometReranker, Reranker
+from rerankers import RatioReranker, LikelihoodReranker, CometReranker, MultiReranker
 
 torch.cuda.empty_cache()
 gc.collect()
@@ -21,7 +21,7 @@ def flush():
 def load_reranker(reranker_type, granularity, device_map):
     if reranker_type == "ratios":
         return RatioReranker(
-            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            model_path="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
             granularity=granularity,
             device_map=device_map,
             attn_implementation="flash_attention_2"
@@ -35,7 +35,7 @@ def load_reranker(reranker_type, granularity, device_map):
     elif reranker_type == "comet":
         return CometReranker("Unbabel/XCOMET-XL")
     elif reranker_type == "combined":
-        return Reranker(
+        return MultiReranker(
             model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
             hf_kwargs={"device_map": device_map, "attn_implementation": "flash_attention_2"},
             comet_model="Unbabel/XCOMET-XL",
@@ -164,7 +164,7 @@ def tune_pipeline(
     sampling_params: SamplingParams | None = None,
     granularity: Literal['token', 'segment', 'sequence'] | None = None,
 ):
-    reranker = Reranker(
+    reranker = MultiReranker(
         model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
         hf_kwargs={"device_map": device_map},
         comet_model="Unbabel/XCOMET-XL",

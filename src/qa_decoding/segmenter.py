@@ -129,10 +129,10 @@ class Segmenter:
         return masks
 
     
-    def compute(self, prompts: List[str] | None = None, completions: List[List[str]] | None = None, lang: str | None = None, batches: List[List[List[dict]]] | None = None):
+    def compute(self, prompts: List[str] | None = None, completions: List[List[str]] | None = None, lang: str | None = None, batches: List[List[List[dict]]] | List[List[dict]] | None = None):
         masks = []
-        if batch:
-            batch = self.prepare_data(batch)
+        if batches:
+            batches = self.prepare_data(batches)
             outputs = self.model_forward(batch)
             seg_masks = [{"segment_mask": seg_mask} for seg_mask in self.compute_segment(**outputs)]
             return seg_masks

@@ -10,7 +10,7 @@ import json
 import os
 import gc
 
-from reranker import RatioArgs, LikelihoodArgs, CometConfig, RerankerConfig
+from rerankers import RatioArgs, LikelihoodArgs, CometArgs, RerankerArgs
 from data_utils import GenerationConfig, vLLMGenerationConfig, load_dataset
 from gen_utils import tune, vllm_generator, hf_generator
 
@@ -38,9 +38,9 @@ def parse_args(args):
         elif reranker_type == "likelihood":
             reranker_config = LikelihoodArgs
         elif reranker_type == 'comet':
-            reranker_config = CometConfig
+            reranker_config = CometArgs
         elif reranker_type == 'combined':
-            reranker_config = RerankerConfig
+            reranker_config = RerankerArgs
         hf_parser = HfArgumentParser([gen_config, reranker_config])
         generation_kwargs, rerank_args = hf_parser.parse_args_into_dataclasses(args=kwargs)
         if hasattr(rerank_args, "tgt_lang") and asdict(rerank_args).get("tgt_lang") is None:
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     torch.cuda.reset_peak_memory_stats()
 
     output_file = args.output_file
-    output_dir = '/'.join(output_file.split('/')[:-1]) + "/" + args.model.split('/')[-1].lower()
+    output_dir = '/'.join(output_file.split('/')[:2]) + '/' + args.model.split('/')[-1].lower() + "/" + output_file.split('/')[-2]
     output_file = output_file.split('/')[-1]
     if "none" in output_file:
         output_file = output_file.replace("none", "unranked")

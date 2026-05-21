@@ -17,6 +17,8 @@ def comet_scorer(data, model: CometModel, model_name: str, ref_free: bool = Fals
     if ref_free:
         data = list(map(lambda x: {'src': x['src'].strip(), 'mt': x['mt'].strip()}, data))
     else:
+        if args.evaluate_refs:
+            return "--"
         data = list(map(lambda x: {'src': x['src'].strip(), 'ref': x['ref'].strip(), 'mt': x['mt'].strip()}, data))
     scores = model.predict(data)
     torch.cuda.empty_cache()
@@ -34,6 +36,7 @@ def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str)
     parser.add_argument('--tgt_lang', type=str, default=None)
+    parser.add_argument('--evaluate_refs', action='store_true', default=False)
     parser.add_argument('--output_dir', type=str, help="Path to result file(s).", default=None)
     parser.add_argument('--output_file', type=str, default=None)
     return parser
@@ -54,6 +57,8 @@ code2name = {
 }
 
 def calc_spbleu(data):
+    if args.evaluate_refs:
+        return "--"
     print("Calculating spBLEU")
     mts = [item['mt'].strip() for item in data]
     refs = [[item['ref'].strip()] for item in data]
@@ -64,6 +69,8 @@ def calc_spbleu(data):
     return scores.score
 
 def calc_meteor(data):
+    if args.evaluate_refs:
+        return "--"
     print("Calculating METEOR")
 
     scores = []
@@ -96,7 +103,7 @@ print(torch.cuda.is_available())
 def run_evaluation(data, tgt_lang):
     comet_score = comet_scorer(data, comet, "Comet")
     cometkiwi_score = comet_scorer(data, cometkiwi, "CometKiwi", ref_free=True)
-    xcomet_score = comet_scorer(data, xcomet, "XCOMET")
+    xcomet_score = comet_scorer(data, xcomet, "XCOMET", ref_free=args.evaluate_refs)
     spbleu_score = calc_spbleu(data)
     meteor_score = calc_meteor(data)
     teval_score = calc_teval(data, tgt_lang)
