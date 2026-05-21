@@ -1,27 +1,21 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizerBase, PreTrainedModel
 import torch
 
-from tqdm import tqdm
-from utils import pad
-
 from typing import List
+from tqdm import tqdm
+from functools import partial
 
-code2name = {
-    "zho": "Chinese",
-    "fra": "French",
-    "deu": "German",
-    "msa": "Malay",
-    "kor": "Korean",
-}
+from data_utils import prepare_data
 
 class Segmenter:
     def __init__(self, model: str | PreTrainedModel, tokenizer: PreTrainedTokenizerBase | None = None, **model_kwargs):
         if isinstance(model, str):
             self.model = AutoModelForCausalLM.from_pretrained(model, **model_kwargs)
-            self.tokenizer = AutoTokenizer.from_pretrained(model)
+            tokenizer = AutoTokenizer.from_pretrained(model)
         else:
             self.model = model
-            self.tokenizer = tokenizer
+            tokenizer = tokenizer
+        self.prepare_data = partial(prepare_data, tokenizer=tokenizer)
 
     def H(self, logits: torch.Tensor):
         probs = logits.softmax(-1)
@@ -134,93 +128,17 @@ class Segmenter:
         masks = (((start | bp) & (end & obg))).int().masked_fill(~completion_mask, -100) 
         return masks
 
-    def format_messages(self, prompt: str, completion: str, lang: str,):
-        return {
-            "prompt": [
-                {"role": "user", "content": f"Translate the following text into {lang}.\n\n{prompt}"}
-            ],
-            "completion": [
-                {"role": "assistant", "content": completion}
-            ]
-        }
     
-    def tokenize_fn(self, text, tokenizer: PreTrainedTokenizerBase, **kwargs):
-        return tokenizer.apply_chat_template(
-            text,
-            tokenize=True,
-            return_dict=True,
-            **kwargs
-        )
-
-    def preprocess_batch(self, prompt: str, completions: List[str], lang: str):
-        data = []
-        for completion in completions:
-            sample = self.format_messages(prompt, completion, lang)
-            data.append(sample)
-        return data
-    
-    def prepare_sample(self, sample):
-        output = {}
-        prompt_ids = self.tokenize_fn(
-            sample['prompt'],
-            tokenizer=self.tokenizer,
-            add_generation_prompt=True,
-        )['input_ids']
-
-        prompt_completion_processed = self.tokenize_fn(
-            sample['prompt'] + sample['completion'],
-            tokenizer=self.tokenizer,
-        )
-
-        prompt_completion_ids = prompt_completion_processed['input_ids']
-        attention_mask = prompt_completion_processed['attention_mask']
-        completion_mask = [0] * len(prompt_ids) + [1] * (len(prompt_completion_ids) - len(prompt_ids))
-
-        output['input_ids'] = torch.tensor(prompt_completion_ids)
-        output['attention_mask'] = torch.tensor(attention_mask)
-        output['completion_mask'] = torch.tensor(completion_mask)
-
-        return output
-
-    def collate_fn(self, examples):
-        input_ids = [example['input_ids'] for example in examples]
-        attention_mask = [example['attention_mask'] for example in examples]
-        completion_mask = [example['completion_mask'] for example in examples]
-
-        input_ids = pad(
-            input_ids,
-            padding_value=self.tokenizer.pad_token_id,
-        )
-        attention_mask = pad(
-            attention_mask,
-            padding_value=0,
-        )
-        completion_mask = pad(
-            completion_mask,
-            padding_value=0,
-        )
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "completion_mask": completion_mask
-        }
-    
-    def get_batch(self, prompt: str | None = None, completions: List[str] | None = None, lang: str | None = None, samples: List[List[dict]] | List[dict] | None = None):
-        if samples is None:
-            samples = self.preprocess_batch(prompt, completions, lang)
-        batch = self.collate_fn(samples)
-        return batch
-
-    def compute(self, prompts: List[str] | None = None, completions: List[List[str]] | None = None, lang: str | None = None, batch: List[List[dict]] | List[tuple[dict, dict]] | tuple[list, list] | None = None):
+    def compute(self, prompts: List[str] | None = None, completions: List[List[str]] | None = None, lang: str | None = None, batches: List[List[List[dict]]] | None = None):
         masks = []
         if batch:
-            batch = self.get_batch(samples=batch)
+            batch = self.prepare_data(batch)
             outputs = self.model_forward(batch)
             seg_masks = [{"segment_mask": seg_mask} for seg_mask in self.compute_segment(**outputs)]
             return seg_masks
-        for prompt, completion in tqdm(zip(prompts, completions), total=len(prompts), desc="Segmenting..."):
-            batch = self.get_batch(prompt, completion, lang)
+        
+        batches = self.prepare_data(prompts, completions, lang)
+        for i, batch in enumerate(tqdm(batches, total=len(prompts), desc="Segmenting...")):
             outputs = self.model_forward(batch)
             seg_masks = self.compute_segment(**outputs)
             masks.append(seg_masks)

@@ -1,0 +1,55 @@
+granularity=sequence
+uv run --extra cu130 python src/qa_decoding/generate.py \
+    --model Qwen/Qwen3-4B \
+    --data_path NTREX/NTREX-128 \
+    --tgt_lang kor \
+    --best_of 16 \
+    --output_file results/qa_decode_tuned/enko_reranker_weights.json \
+    --temperature 0.7 \
+    --top_k 20 \
+    --top_p 0.90 \
+    --granularity ${granularity} \
+    --return_score true \
+    --return_nat true \
+    --return_comet true \
+    --max_tokens 512 \
+    --vllm \
+    --batch_size 16 \
+    --reranker_type combined \
+    --tune_reranker
+uv run --extra cu130 python src/qa_decoding/generate.py \
+    --model Qwen/Qwen3-4B \
+    --data_path NTREX/NTREX-128 \
+    --tgt_lang msa \
+    --best_of 16 \
+    --output_file results/qa_decode_tuned/enms_reranker_weights.json \
+    --temperature 0.7 \
+    --top_k 20 \
+    --top_p 0.90 \
+    --granularity ${granularity} \
+    --return_score true \
+    --return_nat true \
+    --return_comet true \
+    --max_tokens 512 \
+    --vllm \
+    --batch_size 16 \
+    --reranker_type combined \
+    --tune_reranker
+uv run --extra cu130 python src/qa_decoding/generate.py \
+    --model Qwen/Qwen3-4B \
+    --data_path NTREX/NTREX-128 \
+    --tgt_lang zho \
+    --best_of 16 \
+    --output_file results/qa_decode_tuned/enzh_reranker_weights.json \
+    --temperature 0.7 \
+    --top_k 20 \
+    --top_p 0.90 \
+    --granularity ${granularity} \
+    --return_score true \
+    --return_nat true \
+    --return_comet true \
+    --max_tokens 512 \
+    --vllm \
+    --batch_size 16 \
+    --reranker_type combined \
+    --tune_reranker

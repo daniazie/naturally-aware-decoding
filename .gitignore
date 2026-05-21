@@ -4,3 +4,5 @@ uv.lock
 __pycache__/
 _tests
 _*
+results/*
+evaluation/scores/*

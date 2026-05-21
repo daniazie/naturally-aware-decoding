@@ -40,7 +40,7 @@ def init_parser():
 
 meteor = load('meteor')
 spbleu = BLEU(tokenize='spBLEU-1K')
-teval = TranslationeseIndex(model_path="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10", device_map="auto")
+teval = TranslationeseIndex(model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10", device_map="auto", attn_implementation="flash_attention_2")
 comet = load_comet_model("Unbabel/wmt22-comet-da")
 xcomet = load_comet_model("Unbabel/XCOMET-XL")
 cometkiwi = load_comet_model("Unbabel/wmt22-cometkiwi-da")
@@ -48,7 +48,9 @@ cometkiwi = load_comet_model("Unbabel/wmt22-cometkiwi-da")
 code2name = {
     "enzh": "Chinese",
     "enfr": "French",
-    "ende": "German"
+    "ende": "German",
+    "enms": "Malay",
+    "enko": "Korean"
 }
 
 def calc_spbleu(data):
@@ -78,8 +80,12 @@ def calc_meteor(data):
 def calc_teval(data, tgt_lang):
     srcs = [item['src'] for item in data]
     mts = [item['mt'] for item in data]
-    results = teval.score(srcs, mts, lang=tgt_lang, normalise_score=True)
-    return results['mean_score']
+    granularity = ['token', 'segment', 'sequence']
+    results = {}
+    for g in granularity:
+        res = teval.score(srcs, mts, lang=tgt_lang, granularity=g)
+        results.update({g: res['mean_score'] * 100})
+    return results
     
 
 parser = init_parser()
@@ -101,7 +107,7 @@ def run_evaluation(data, tgt_lang):
         "XCOMET": xcomet_score * 100,
         'spBLEU': spbleu_score,
         'METEOR': meteor_score,
-        "Naturalness": teval_score * 100
+        "Naturalness": teval_score
     }
 
     print(final)
@@ -134,7 +140,9 @@ if __name__ == "__main__":
                 with open(f'{args.data_path}/{data_file}', 'r') as file:
                     data = json.load(file)
                 
-                tgt_lang = code2name[data_file.split('_')[2]]
+                lang_idx = data_file.index("_en") + 1
+                lang = slice(lang_idx, lang_idx+4)
+                tgt_lang = code2name[data_file[lang]]
 
             results = run_evaluation(data, tgt_lang)
 

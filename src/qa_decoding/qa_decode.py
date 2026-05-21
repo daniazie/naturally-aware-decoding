@@ -1,4 +1,4 @@
-from transformers import PreTrainedModel, PreTrainedTokenizerBase, HfArgumentParser, BitsAndBytesConfig, set_seed
+from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from datasets import Dataset
 from typing import List, Dict, Literal
 
@@ -7,11 +7,54 @@ from tqdm import tqdm
 import torch
 import gc
 
-from reranker import TranslationeseReranker, CometReranker, Reranker
-from segmenter import Segmenter
+from reranker import RatioReranker, LikelihoodReranker, CometReranker, Reranker
+
 torch.cuda.empty_cache()
 gc.collect()
 torch.cuda.reset_peak_memory_stats()
+
+def flush():
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+def load_reranker(reranker_type, granularity, device_map):
+    if reranker_type == "ratios":
+        return RatioReranker(
+            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            granularity=granularity,
+            device_map=device_map,
+            attn_implementation="flash_attention_2"
+        )
+    elif reranker_type == "likelihood":
+        return LikelihoodReranker(
+            model="Qwen/Qwen2.5-0.5B",
+            device_map=device_map,
+            attn_implementation="flash_attention_2"
+        )
+    elif reranker_type == "comet":
+        return CometReranker("Unbabel/XCOMET-XL")
+    elif reranker_type == "combined":
+        return Reranker(
+            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            hf_kwargs={"device_map": device_map, "attn_implementation": "flash_attention_2"},
+            comet_model="Unbabel/XCOMET-XL",
+            granularity=granularity
+        )
+    return
+
+def _generate(texts, model, sampling_params):
+    preds = []
+    for i, batch in enumerate(tqdm(texts, total=len(texts), desc="Generating...")):
+        outputs = model.generate(batch['prompt'], sampling_params=sampling_params, use_tqdm=False)
+        mts = [output.outputs[0].text for output in outputs]
+        for src, mt, ref in zip(batch['src'], mts, batch['ref']):
+            preds.append({
+                "src": src,
+                "ref": ref,
+                "mt": mt
+            })
+    return preds
 
 def hf_pipeline(
     model: PreTrainedModel,
@@ -20,25 +63,13 @@ def hf_pipeline(
     batch_size: int = 4,
     device_map: str = "auto",
     best_of: int = 8,
-    reranker_type: Literal["natural", "comet", "combined"] | None = None,
+    reranker_type: Literal["ratios", "comet", "combined", "likelihood"] | None = None,
     granularity: Literal['token', 'segment', 'sequence'] | None = None,
     reranker_args: dict | None = None,
     generation_kwargs: dict | None = None,
     enable_tqdm: bool = True
 ):
-    if reranker_type == "natural":
-        reranker = TranslationeseReranker(
-            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-            granularity=granularity,
-            device_map=device_map
-        )
-    elif reranker_type == "comet":
-        reranker = CometReranker()
-    elif reranker_type == "combined":
-        reranker = Reranker(
-            nat_eval_model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-            hf_kwargs={"device_map": device_map},
-        )
+    reranker = load_reranker(reranker_type, granularity=granularity, device_map=device_map)
 
     if isinstance(texts, list):
         texts = Dataset.from_list(texts)
@@ -91,24 +122,12 @@ def vllm_pipeline(
     batch_size: int = 4,
     device_map: str = "auto",
     sampling_params: SamplingParams | None = None,
-    reranker_type: Literal["natural", "comet", "combined"] | None = None,
+    reranker_type: Literal["ratios", "likelihood", "comet", "combined"] | None = None,
     granularity: Literal['token', 'segment', 'sequence'] | None = None,
     reranker_args: dict | None = None,
 ):
-    if reranker_type == "natural":
-        reranker = TranslationeseReranker(
-            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-            granularity=granularity,
-            device_map=device_map
-        )
-    elif reranker_type == "comet":
-        reranker = CometReranker()
-    elif reranker_type == "combined":
-        reranker = Reranker(
-            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-            hf_kwargs={"device_map": device_map},
-            granularity=granularity
-        )
+    
+    reranker = load_reranker(reranker_type, granularity=granularity, device_map=device_map)
 
     if isinstance(texts, list):
         texts = Dataset.from_list(texts)
@@ -118,14 +137,9 @@ def vllm_pipeline(
     texts = texts.batch(batch_size)
 
     preds = []
-
-
+    
     if reranker_type is None:
-        for i, batch in enumerate(tqdm(texts, total=len(texts), desc="Generating...")):
-            outputs = model.generate(batch['prompt'], sampling_params=sampling_params, use_tqdm=False)
-            mts = [output.outputs[0].text for output in outputs]
-            preds += mts
-        return preds
+        return _generate(texts, model=model, sampling_params=sampling_params)
 
     for i, batch in enumerate(tqdm(texts, total=len(texts), desc="Generating...")):
         outputs = model.generate(batch['prompt'], sampling_params=sampling_params, use_tqdm=False)
@@ -133,9 +147,46 @@ def vllm_pipeline(
 
         best = reranker.rerank(batch['src'], mts, **reranker_args)
         if i % 4 == 0:
-            gc.collect()
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
+            flush()
+        for res, ref in zip(best, batch['ref']):
+            res.update({
+                "ref": ref,
+            })
         preds += best
     return preds
 
+def tune_pipeline(
+    model: LLM,
+    texts: List[dict] | Dict[str, List[str]] | Dataset,
+    tgt_lang: str,
+    batch_size: int = 4,
+    device_map: str = "auto",
+    sampling_params: SamplingParams | None = None,
+    granularity: Literal['token', 'segment', 'sequence'] | None = None,
+):
+    reranker = Reranker(
+        model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+        hf_kwargs={"device_map": device_map},
+        comet_model="Unbabel/XCOMET-XL",
+        granularity=granularity
+    )
+
+    if isinstance(texts, list):
+        texts = Dataset.from_list(texts)
+    elif isinstance(texts, dict):
+        texts = Dataset.from_dict(texts)
+    
+    texts = texts.batch(batch_size)
+
+
+    W_nat, W_comet = [], []
+
+    for i, batch in enumerate(tqdm(texts, total=len(texts), desc="Generating...")):
+        outputs = model.generate(batch['prompt'], sampling_params=sampling_params, use_tqdm=False)
+        mts = [[seq.text for seq in output.outputs] for output in outputs]
+
+        w_nat, w_comet = reranker.tune(batch['src'], mts, tgt_lang, learning_rate=1e-4, num_epochs=2)
+        W_nat.append(w_nat)
+        W_comet.append(w_comet)
+    
+    return W_nat, W_comet

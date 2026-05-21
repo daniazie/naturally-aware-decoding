@@ -1,10 +1,17 @@
 reranker_type=(
-    "none"
-    "natural"
+    "ratios"
+    "likelihood"
     "comet"
     "combined"
 )
 
+models=(
+    "Qwen/Qwen3-4B"
+    "google/gemma-3-4b-it"
+)
+
 for reranker in ${reranker_type[@]}; do
-    bash scripts/decode.sh ${reranker}
+    for model in ${models[@]}; do
+        bash scripts/decode.sh ${model} ${reranker}
+    done
 done
