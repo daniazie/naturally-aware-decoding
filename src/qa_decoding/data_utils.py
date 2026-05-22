@@ -24,6 +24,12 @@ class vLLMGenerationConfig:
     temperature: float = 0.6
     max_tokens: int = 1024
 
+@dataclass
+class ModelArgs:
+    attn_implementation: str = "sdpa"
+    dtype: torch.dtype = torch.bfloat16
+    device_map: str = "auto"
+
 code2name = {
     "zho": "Chinese",
     "fra": "French",

@@ -3,6 +3,7 @@ reranker_type=(
     "likelihood"
     "comet"
     "combined"
+    "none"
 )
 
 models=(

@@ -33,7 +33,8 @@ class MultiReranker():
         nat_results = []
         comet_results = []
         for i, src in enumerate(tqdm(srcs, desc="Reranking...")):
-            nat_scores: torch.Tensor = self.nat_reranker._score(src, mts[i], tgt_lang)
+            batch = self.nat_reranker.prepare_data(src, mts[i], tgt_lang)
+            nat_scores: torch.Tensor = self.nat_reranker._score(batch)
             nat_scores = nat_scores.sigmoid().to(dtype=torch.float32).numpy()
             comet_scores = np.array(self.comet_reranker.compute(src, mts[i]))
 

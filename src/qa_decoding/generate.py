@@ -14,6 +14,8 @@ from rerankers import RatioArgs, LikelihoodArgs, CometArgs, RerankerArgs
 from data_utils import GenerationConfig, vLLMGenerationConfig, load_dataset
 from gen_utils import tune, vllm_generator, hf_generator
 
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+
 def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default=None)
@@ -55,7 +57,6 @@ def parse_args(args):
     return args, generation_kwargs, rerank_args
 
 if __name__ == "__main__":
-    warnings.filterwarnings('ignore', category=DeprecationWarning)
     parser = init_parser()
     args, kwargs = parser.parse_known_args()
     torch.cuda.empty_cache()

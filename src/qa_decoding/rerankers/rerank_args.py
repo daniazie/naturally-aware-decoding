@@ -19,7 +19,8 @@ class CometArgs:
     return_score: bool = False
 
 @dataclass
-class RerankerArgs(RatioArgs):
+class RerankerArgs:
+    tgt_lang: str | None = None
     w_nat: float = 1.0
     w_comet: float = 1.0
     return_score: bool = False

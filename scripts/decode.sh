@@ -1,22 +1,14 @@
 model=$1
 reranker_type=$2
 
-if [[ $model == "Qwen/Qwen3-4B" ]]; then
-    granularities=(
-    "segment"
-)
-else
-    granularities=(
-    "token"
-    "sequence"
-    "segment"
-)
-fi
-
 metrics=(
     "perplexity"
     "entropy"
     "surprisal"
+)
+
+granularities=(
+    "segment"
 )
 
 if [[ $reranker_type == "ratios" ]]; then
@@ -26,7 +18,7 @@ if [[ $reranker_type == "ratios" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang kor \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${granularity}_enko_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${granularity}_enko_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -42,7 +34,7 @@ if [[ $reranker_type == "ratios" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang msa \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${granularity}_enms_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${granularity}_enms_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -58,7 +50,7 @@ if [[ $reranker_type == "ratios" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang zho \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${granularity}_enzh_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${granularity}_enzh_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -77,7 +69,7 @@ elif [[ $reranker_type == "likelihood" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang kor \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${metric}_enko_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${metric}_enko_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -93,7 +85,7 @@ elif [[ $reranker_type == "likelihood" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang msa \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${metric}_enms_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${metric}_enms_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -109,7 +101,7 @@ elif [[ $reranker_type == "likelihood" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang zho \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${metric}_enzh_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${metric}_enzh_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -128,7 +120,7 @@ elif [[ $reranker_type == "combined" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang kor \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${granularity}_enko_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${granularity}_enko_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -145,7 +137,7 @@ elif [[ $reranker_type == "combined" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang msa \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${granularity}_enms_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${granularity}_enms_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -162,7 +154,7 @@ elif [[ $reranker_type == "combined" ]]; then
             --data_path NTREX/NTREX-128 \
             --tgt_lang zho \
             --best_of 32 \
-            --output_file results/qa_decode_run3/${reranker_type}/${granularity}_enzh_ntrex-128_results.json \
+            --output_file results/qa_decode_run5/${reranker_type}/${granularity}_enzh_ntrex-128_results.json \
             --temperature 0.9 \
             --top_k 20 \
             --top_p 0.90 \
@@ -181,7 +173,7 @@ elif [[ $reranker_type == "comet" ]]; then
         --data_path NTREX/NTREX-128 \
         --tgt_lang kor \
         --best_of 32 \
-        --output_file results/qa_decode_run3/${reranker_type}/enko_ntrex-128_results.json \
+        --output_file results/qa_decode_run5/${reranker_type}/enko_ntrex-128_results.json \
         --temperature 0.9 \
         --top_k 20 \
         --top_p 0.90 \
@@ -195,7 +187,7 @@ elif [[ $reranker_type == "comet" ]]; then
         --data_path NTREX/NTREX-128 \
         --tgt_lang msa \
         --best_of 32 \
-        --output_file results/qa_decode_run3/${reranker_type}/enms_ntrex-128_results.json \
+        --output_file results/qa_decode_run5/${reranker_type}/enms_ntrex-128_results.json \
         --temperature 0.9 \
         --top_k 20 \
         --top_p 0.90 \
@@ -209,7 +201,7 @@ elif [[ $reranker_type == "comet" ]]; then
         --data_path NTREX/NTREX-128 \
         --tgt_lang zho \
         --best_of 32 \
-        --output_file results/qa_decode_run3/${reranker_type}/enzh_ntrex-128_results.json \
+        --output_file results/qa_decode_run5/${reranker_type}/enzh_ntrex-128_results.json \
         --temperature 0.9 \
         --top_k 20 \
         --top_p 0.90 \
@@ -224,7 +216,7 @@ else
         --data_path NTREX/NTREX-128 \
         --tgt_lang kor \
         --best_of 32 \
-        --output_file results/qa_decode_run3/${reranker_type}/enko_ntrex-128_results.json \
+        --output_file results/qa_decode_run5/${reranker_type}/enko_ntrex-128_results.json \
         --temperature 0.9 \
         --top_k 20 \
         --top_p 0.90 \
@@ -237,7 +229,7 @@ else
         --data_path NTREX/NTREX-128 \
         --tgt_lang msa \
         --best_of 32 \
-        --output_file results/qa_decode_run3/${reranker_type}/enms_ntrex-128_results.json \
+        --output_file results/qa_decode_run5/${reranker_type}/enms_ntrex-128_results.json \
         --temperature 0.9 \
         --top_k 20 \
         --top_p 0.90 \
@@ -250,7 +242,7 @@ else
         --data_path NTREX/NTREX-128 \
         --tgt_lang zho \
         --best_of 32 \
-        --output_file results/qa_decode_run3/${reranker_type}/enzh_ntrex-128_results.json \
+        --output_file results/qa_decode_run5/${reranker_type}/enzh_ntrex-128_results.json \
         --temperature 0.9 \
         --top_k 20 \
         --top_p 0.90 \

@@ -14,6 +14,7 @@ dependencies = [
     "jupyterlab>=4.5.7",
     "kernels>=0.14.0",
     "litmodels>=0.1.8",
+    "malaya>=5.1.1",
     "matplotlib>=3.10.9",
     "nltk>=3.9.4",
     "sacrebleu>=2.6.0",
@@ -58,6 +59,7 @@ cu130 = [
     "flash-attn-3>=3.0.0",
     "causal-conv1d>=1.6.2.post1",
     "vllm>=0.21.0",
+    "flash-attn-4[cu13]>=4.0.0b14",
 ]
 
 [[tool.uv.index]]
@@ -131,6 +133,7 @@ conflicts = [
 [tool.uv.extra-build-dependencies]
 flash-attn = ["torch"]
 flash-attn-3 = ["torch"]
+flash-attn-4 = ["torch"]
 
 [dependency-groups]
 dev = [

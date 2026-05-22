@@ -76,9 +76,9 @@ class LikelihoodReranker(BaseReranker):
             scores = compute(logits, labels)
             if normalise_scores:
                 if metric == 'entropy':
-                    scores = scores / scores.max(-1)
+                    scores = scores / scores.amax(-1, keepdim=True)
                 elif metric == 'surprisal':
-                    scores = scores / (- (scores.min(-1)))
+                    scores = scores / (- (scores.amax(-1, keepdim=True)))
                 elif metric == 'perplexity':
                     scores = ((torch.log(torch.tensor(self.model.vocab_size)) - torch.log(scores)) / torch.log(torch.tensor(self.model.vocab_size))).masked_fill(~completion_mask, 0)
             

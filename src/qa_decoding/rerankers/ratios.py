@@ -85,57 +85,34 @@ class RatioReranker(BaseReranker):
         entropy = entropy.masked_fill(~completion_mask, 0)
         return entropy
         
-    def per_segment_logps(self, pos_tensor: torch.Tensor, neg_tensor: torch.Tensor, seg_mask: torch.Tensor):
+    def per_segment_logps(self, log_lklh_positive: torch.Tensor, log_lklh_negative: torch.Tensor, mask: torch.Tensor):
         rewards = []
-        segment_pos = []
-        segment_neg = []
-        for i, t in enumerate(seg_mask):
-            if t < 0:
+        logps_pos_segments = []
+        logps_neg_segments = []
+        for i, m in enumerate(mask):
+            if m < 0:
                 continue
-            if t == 0:
-                segment_pos.append(pos_tensor[i])
-                segment_neg.append(neg_tensor[i])
-            if t == 1:
-                if segment_pos and segment_neg:
-                    logps_pos = torch.tensor(segment_pos).mean()
-                    logps_neg = torch.tensor(segment_neg).mean()
-                    if self.use_perplexity:
-                        ppl_pos = torch.exp(-logps_pos)
-                        ppl_neg = torch.exp(-logps_neg)
-                        rewards.append(ppl_pos - ppl_neg)
-                    else:
-                        logps_ratios = logps_pos - logps_neg
-                        rewards.append(logps_ratios)
-                    segment_pos = [pos_tensor[i]]
-                    segment_neg = [neg_tensor[i]]
-            if not i == len(seg_mask) - 1:
-                if seg_mask[i+1] < 0:
-                    logps_pos = torch.tensor(segment_pos).mean()
-                    logps_neg = torch.tensor(segment_neg).mean()
-                    if self.use_perplexity:
-                        ppl_pos = torch.exp(-logps_pos)
-                        ppl_neg = torch.exp(-logps_neg)
-                        rewards.append(ppl_pos - ppl_neg)
-                    else:
-                        logps_ratios = logps_pos - logps_neg
-                        rewards.append(logps_ratios)
-            else:
-                if t >= 0:
-                    logps_pos = torch.tensor(segment_pos).mean()
-                    logps_neg = torch.tensor(segment_neg).mean()
-                    if self.use_perplexity:
-                        ppl_pos = torch.exp(-logps_pos)
-                        ppl_neg = torch.exp(-logps_neg)
-                        rewards.append(ppl_pos - ppl_neg)
-                    else:
-                        logps_ratios = logps_pos - logps_neg
-                        rewards.append(logps_ratios)
-        try:
-            rewards = torch.stack(rewards).mean()
-            return rewards
-        except:
-            print(rewards, len(rewards))
-            raise Exception
+            if (i == len(mask) - 1):
+                logps_pos_segments.append(log_lklh_positive[i])
+                logps_neg_segments.append(log_lklh_negative[i])
+                logps_pos_segments = torch.stack(logps_pos_segments)
+                logps_neg_segments = torch.stack(logps_neg_segments)
+                segment_rewards = logps_pos_segments.mean() - logps_neg_segments.mean()
+                rewards.append(segment_rewards)
+                continue
+            is_end = (m == 1) or (mask[i+1] == 2) or (mask[i+1] < 0)
+            logps_pos_segments.append(log_lklh_positive[i])
+            logps_neg_segments.append(log_lklh_negative[i])
+            if is_end:
+                logps_pos_segments = torch.stack(logps_pos_segments)
+                logps_neg_segments = torch.stack(logps_neg_segments)
+                segment_rewards = logps_pos_segments.mean() - logps_neg_segments.mean()
+                rewards.append(segment_rewards)
+                logps_pos_segments = []
+                logps_neg_segments = []
+                continue
+        rewards = torch.stack(rewards)
+        return rewards.mean()
 
     def compute_rewards(self, log_lklh_positive: torch.Tensor, log_lklh_negative: torch.Tensor, c_masks: torch.Tensor | None = None, seg_masks: torch.Tensor | None = None):
         if self.granularity == 'segment':
@@ -179,9 +156,7 @@ class RatioReranker(BaseReranker):
         for i, batch in enumerate(tqdm(batches, total=len(batches), desc="Reranking...")):
             rewards = self._score(batch)
             if normalise_scores:
-                rewards = 1 - rewards.sigmoid()
-                best = rewards.argmax().item()
-            else:
+                rewards = rewards.softmax(-1)
                 best = rewards.argmin().item()
             res = {
                 "src": srcs[i],

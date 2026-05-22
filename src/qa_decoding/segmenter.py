@@ -25,71 +25,47 @@ class Segmenter:
     def I(self, logits: torch.Tensor, labels: torch.Tensor):
         return - logits.log_softmax(-1).gather(-1, labels.unsqueeze(-1)).squeeze(-1)
 
-    def tau(self, tensors: torch.Tensor, c_masks: torch.Tensor):
-        maxima_masks = []
+    def compute_mask(self, tensors: torch.Tensor, c_masks: torch.Tensor):
         minima_masks = []
         for tensor in tensors:
-            maxima_mask = []
             minima_mask = []
             for i in range(len(tensor)):
                 if i + 1 == len(tensor):
-                    maxima_mask.append(tensor[i] > tensor[i-1])
                     minima_mask.append(tensor[i] < tensor[i-1])
                 elif i == 0:
-                    maxima_mask.append(tensor[i] > tensor[i+1])
                     minima_mask.append(tensor[i] < tensor[i+1])
                 else:
-                    maxima_mask.append(tensor[i] > tensor[i-1] and tensor[i] > tensor[i+1])
                     minima_mask.append(tensor[i] < tensor[i-1] and tensor[i] < tensor[i+1])
-            maxima_masks.append(torch.stack(maxima_mask))
             minima_masks.append(torch.stack(minima_mask))
-        maxima_masks = torch.stack(maxima_masks)
         minima_masks = torch.stack(minima_masks)
 
-        t_all = tensors.masked_fill(~c_masks, 0).sum(dim=1) / c_masks.sum(dim=1)
-        t_max = tensors.masked_fill(~maxima_masks, 0).sum(dim=1) / c_masks.sum(dim=1)
-        t_all = t_all.unsqueeze(-1)
-        t_max = t_max.unsqueeze(-1)
-        return t_max, t_all, maxima_masks, minima_masks
+        t_min_seq = (tensors.masked_fill(~minima_masks, 0).masked_fill(~c_masks, 0).sum(dim=-1) / c_masks.sum(dim=-1)).unsqueeze(-1)
+        t_min_seg = (tensors.masked_fill(~minima_masks, 0).masked_fill(~c_masks, 0).sum(dim=-1) / minima_masks.int().masked_fill(~c_masks, 0).sum(dim=-1)).unsqueeze(-1)
+        
+        t_min = torch.amin(torch.cat((t_min_seq, t_min_seg)), keepdim=True)
 
-    def get_bs(self, tensor: torch.Tensor, c_mask: torch.Tensor):
-        t_max, t_all, maximas, minimas = self.tau(tensor, c_mask)
-        b0_mask = tensor >= t_max
-        b1_mask = tensor >= t_all
-        b2_mask = maximas
-        b3_mask = ~minimas
-        return b0_mask, b1_mask, b2_mask, b3_mask
-
-    def get_boundaries(self, H: torch.Tensor, I: torch.Tensor, c_mask: torch.Tensor):
-        H_bs = self.get_bs(H, c_mask)
-        I_bs = self.get_bs(I, c_mask)
-
-        strong = (H_bs[0] & H_bs[2]) & (I_bs[1] | I_bs[3])
-        weak = (H_bs[1] & H_bs[2]) & (I_bs[1] | I_bs[3])
-        bp = (H_bs[1] & H_bs[2]) | (I_bs[1] & I_bs[2])
-        obg = (H_bs[0] & H_bs[2]) & (I_bs[0] & I_bs[2])
-        return strong, weak, bp, obg
+        masks = minima_masks & (tensors < t_min)
+        return masks
     
-    def segment(self, tensor: torch.Tensor, mask: torch.Tensor):
-        segments = []
-        segment = []
-        for i, t in enumerate(mask):
-            if t < 0:
-                continue
-            if t == 0:
+    def segment(self, tensors: torch.Tensor, masks: torch.Tensor):
+        all_segments = []
+        for tensor, mask in zip(tensors, masks):
+            segments = []
+            for i, m in enumerate(mask):
+                if m < 0:
+                    continue
+                if (i == len(mask) - 1):
+                    segment.append(tensor[i])
+                    segments.append(segment)
+                    continue
+                is_end = (m == 1) or (mask[i+1] < 0)
                 segment.append(tensor[i])
-            if t == 1:
-                if segment:
+                if is_end:
                     segments.append(segment)
-                segment = [tensor[i]]
-            if not i == len(mask) - 1:
-                if mask[i+1] < 0:
-                    segments.append(segment)
-            else:
-                if t >= 0:
-                    segments.append(segment)
-
-        return segments
+                    segment = []
+                    continue
+            all_segments.append(segments)
+        return all_segments
 
     @torch.no_grad()
     def model_forward(self, batch):
@@ -120,12 +96,9 @@ class Segmenter:
         return outputs
 
     def compute_segment(self, logits: torch.Tensor, labels: torch.Tensor, completion_mask: torch.Tensor):
-        entropy = self.H(logits).masked_fill(~completion_mask, 0)
-        surprisal = self.I(logits, labels).masked_fill(~completion_mask, 0)
-
-        end, start, bp, obg = self.get_boundaries(entropy, surprisal, completion_mask)
-
-        masks = (((start | bp) & (end & obg))).int().masked_fill(~completion_mask, -100) 
+        entropy = self.H(logits)
+        entropy_scaled = entropy / entropy.amax(-1, keepdim=True)
+        masks = self.compute_mask(entropy_scaled, completion_mask)
         return masks
 
     

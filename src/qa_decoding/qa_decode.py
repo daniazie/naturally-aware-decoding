@@ -24,20 +24,22 @@ def load_reranker(reranker_type, granularity, device_map):
             model_path="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
             granularity=granularity,
             device_map=device_map,
-            attn_implementation="flash_attention_2"
+            dtype=torch.bfloat16,
+            attn_implementation="flash_attention_4"
         )
     elif reranker_type == "likelihood":
         return LikelihoodReranker(
             model="Qwen/Qwen2.5-0.5B",
             device_map=device_map,
-            attn_implementation="flash_attention_2"
+            dtype=torch.bfloat16,
+            attn_implementation="flash_attention_4"
         )
     elif reranker_type == "comet":
         return CometReranker("Unbabel/XCOMET-XL")
     elif reranker_type == "combined":
         return MultiReranker(
             model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
-            hf_kwargs={"device_map": device_map, "attn_implementation": "flash_attention_2"},
+            hf_kwargs={"dtype": torch.bfloat16, "device_map": device_map, "attn_implementation": "flash_attention_4"},
             comet_model="Unbabel/XCOMET-XL",
             granularity=granularity
         )

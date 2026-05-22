@@ -8,7 +8,7 @@ import os
 from vllm import LLM, SamplingParams
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 
-from qa_decode import vllm_pipeline, hf_pipeline, tune_pipeline
+from qa_decode import vllm_pipeline, hf_pipeline, tune_pipeline, flush
 from data_utils import load_dataset
 
 def vllm_generator(dataset_loader, args, generation_kwargs, rerank_args=None):
@@ -40,6 +40,7 @@ def vllm_generator(dataset_loader, args, generation_kwargs, rerank_args=None):
         sampling_params=sampling_params
     )
 
+    flush()
     return preds
 
 def hf_generator(dataset_loader, args, generation_kwargs, rerank_args=None):

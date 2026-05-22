@@ -29,8 +29,7 @@ class CometReranker(BaseReranker):
             })
         return sample
     
-    def compute(self, src: str, mts: List[str]) -> List[float]:
-        batch = self._convert_sample(src, mts)
+    def compute(self, batch: List[dict[str,str]]) -> List[float]:
         preds = self.model.predict(batch, progress_bar=False, num_workers=4)
         if hasattr(preds, "metadata"):
             scores = preds.metadata.mqm_scores
@@ -38,8 +37,7 @@ class CometReranker(BaseReranker):
             scores = preds.scores
         return scores
     
-    async def _rerank(self, src: str, mts: List[str], return_score: bool = False):
-        scores = self.compute(src, mts)
+    def _rerank(self, src: str, mts: List[str], scores: List[float], return_score: bool = False):
         best = np.argmax(scores)
         res = {
             "src": src,
@@ -50,12 +48,14 @@ class CometReranker(BaseReranker):
             score = scores[best]
             res.update({"score": score})
         return res
-    
-    async def _gather(self, srcs, mts, return_score):
-        results = [self._rerank(src, mts[i], return_score) for i, src in enumerate(srcs)]
-        results = await tqdm_asyncio.gather(results, desc="Scoring...")
-        return results
 
     def rerank(self, srcs: List[str], mts: List[List[str]], return_score: bool = False):
-        results = asyncio.run(self._gather(srcs, mts, return_score))
+        batch = []
+        n = len(mts[0])
+        for i, src in enumerate(srcs):
+            batch += self._convert_sample(src, mts[i])
+        all_scores = self.compute(src, mts)
+        
+        scores = [[all_scores[i*n:(i+1)*n]] for i in range(len(srcs))]
+        results = [self._rerank(src, mts[i], scores[i], return_score) for i, src in enumerate(srcs)]
         return results
