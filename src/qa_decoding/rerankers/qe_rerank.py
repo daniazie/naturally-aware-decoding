@@ -7,6 +7,16 @@ import torch
 import numpy as np
 from rerankers.base_reranker import BaseReranker
 
+import logging
+import warnings
+warnings.filterwarnings("ignore", module="pytorch_lightning")
+warnings.filterwarnings("ignore", module="lightning")
+warnings.filterwarnings("ignore", category=FutureWarning)
+logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
+logger = logging.getLogger("comet")
+logger.setLevel(logging.ERROR)
+
+
 class CometReranker(BaseReranker):
     def __init__(
         self,

@@ -27,25 +27,37 @@ class MultiReranker():
             })
         
         return res
+    
+    def score_comet(self, srcs: List[str], mts: List[List[str]]):
+        comet_batch = self.comet_reranker.prepare_data(srcs, mts)
+        all_scores = self.comet_reranker.compute(comet_batch)
+        N = len(mts[0])
+        scores = [all_scores[i*N:(i+1)*N] for i in range(len(srcs))]
+        return scores
 
     def rerank(self, srcs: List[str], mts: List[List[str]], tgt_lang: str, return_score: bool = False, w_nat: float = 1., w_comet: float = 1., return_nat: bool = False, return_comet: bool = False):
         results = []
         nat_results = []
         comet_results = []
+        comet_scores = self.score_comet(srcs, mts)
         for i, src in enumerate(tqdm(srcs, desc="Reranking...")):
-            batch = self.nat_reranker.prepare_data(src, mts[i], tgt_lang)
+            comet_score = torch.tensor(comet_scores[i])
+            top_comet, top_idxs = torch.topk(comet_score, k=4)
+            top_mts = [mts[i][j.item()] for j in top_idxs]
+            batch = self.nat_reranker.prepare_data(src, top_mts, tgt_lang)
             nat_scores: torch.Tensor = self.nat_reranker._score(batch)
-            nat_scores = nat_scores.sigmoid().to(dtype=torch.float32).numpy()
-            comet_scores = np.array(self.comet_reranker.compute(src, mts[i]))
+            top_nat = nat_scores.sigmoid().to(dtype=torch.float32)
 
-            scores = ((w_nat * nat_scores) + (w_comet * comet_scores)) / 2
-            res = self.get_best(src, mts[i], scores, return_score=return_score)
+
+
+            scores = ((w_nat * top_nat) + (w_comet * top_comet)) / 2
+            res = self.get_best(src, top_mts[i], scores, return_score=return_score)
 
             if return_nat:
-                nat_res = self.get_best(src, mts[i], nat_scores, return_score=return_score)
+                nat_res = self.get_best(src, top_mts[i], top_nat, return_score=return_score)
                 nat_results.append(nat_res)
             if return_comet:
-                comet_res = self.get_best(src, mts[i], comet_scores, return_score=return_score)
+                comet_res = self.get_best(src, top_mts[i], top_comet, return_score=return_score)
                 comet_results.append(comet_res)
 
             results.append(res)

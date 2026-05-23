@@ -1,35 +1,55 @@
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
+from transformers.generation.utils import GenerateDecoderOnlyOutput, GenerateBeamDecoderOnlyOutput
 from datasets import Dataset
 from typing import List, Dict, Literal
+from functools import partial
 
 from vllm import LLM, SamplingParams
 from tqdm import tqdm
 import torch
 import gc
 
-from rerankers import RatioReranker, LikelihoodReranker, CometReranker, MultiReranker
-
-torch.cuda.empty_cache()
-gc.collect()
-torch.cuda.reset_peak_memory_stats()
+from rerankers import RatioReranker, LikelihoodReranker, CometReranker, MultiReranker, SelfReranker
 
 def flush():
     gc.collect()
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
 
-def load_reranker(reranker_type, granularity, device_map):
+def compute_logits(input_ids: torch.Tensor, outputs: GenerateDecoderOnlyOutput | GenerateBeamDecoderOnlyOutput, best_of, pad_token_id):
+    sequences = outputs.sequences.cpu()
+    input_ids = input_ids
+    completions = sequences[:, input_ids.shape[1]:]
+    completion_mask = torch.cat((torch.zeros([sequences.shape[0], input_ids.shape[1]]), torch.ones_like(completions)), -1).masked_fill(sequences == pad_token_id, 0)
+    logits_tup = outputs.logits
+    logits = []
+    for seq in range(sequences.shape[0]):
+        _logits = torch.stack([token[seq] for token in logits_tup]).cpu()
+        logits.append(_logits)
+    logits = torch.stack([torch.stack(logits[i*best_of:(i+1)*best_of]) for i in range(input_ids.shape[0])])
+    batches = [
+        {
+            "logits": logits,
+            "labels": input_ids,
+            "completion_mask": completion_mask.bool()
+        }
+    ]
+    flush()
+    return sequences, batches
+
+def load_reranker(reranker_type, granularity, per_segment_eval, device_map):
     if reranker_type == "ratios":
         return RatioReranker(
-            model_path="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            model_path="t_index_reproduce/models/sft/qwen3-0.6b-multilingual",
             granularity=granularity,
             device_map=device_map,
             dtype=torch.bfloat16,
-            attn_implementation="flash_attention_4"
+            attn_implementation="flash_attention_2"
         )
     elif reranker_type == "likelihood":
         return LikelihoodReranker(
-            model="Qwen/Qwen2.5-0.5B",
+            model="Qwen/Qwen3-0.6B",
+            per_segment_eval=per_segment_eval,
             device_map=device_map,
             dtype=torch.bfloat16,
             attn_implementation="flash_attention_4"
@@ -38,7 +58,7 @@ def load_reranker(reranker_type, granularity, device_map):
         return CometReranker("Unbabel/XCOMET-XL")
     elif reranker_type == "combined":
         return MultiReranker(
-            model_dir="t_index_reproduce/models/sft/qwen2.5-0.5b-mixture-5000-10",
+            model_dir="t_index_reproduce/models/sft/qwen3-0.6b-multilingual",
             hf_kwargs={"dtype": torch.bfloat16, "device_map": device_map, "attn_implementation": "flash_attention_4"},
             comet_model="Unbabel/XCOMET-XL",
             granularity=granularity
@@ -65,13 +85,16 @@ def hf_pipeline(
     batch_size: int = 4,
     device_map: str = "auto",
     best_of: int = 8,
-    reranker_type: Literal["ratios", "comet", "combined", "likelihood"] | None = None,
+    reranker_type: Literal["ratios", "comet", "combined", "likelihood", "self"] | None = None,
     granularity: Literal['token', 'segment', 'sequence'] | None = None,
     reranker_args: dict | None = None,
     generation_kwargs: dict | None = None,
-    enable_tqdm: bool = True
+    per_segment_eval: bool = False,
 ):
-    reranker = load_reranker(reranker_type, granularity=granularity, device_map=device_map)
+    if reranker_type == 'self':
+        reranker = SelfReranker(tokenizer, best_of=best_of, per_segment_eval=per_segment_eval)
+    else:
+        reranker = load_reranker(reranker_type, granularity=granularity, per_segment_eval=per_segment_eval, device_map=device_map)
 
     if isinstance(texts, list):
         texts = Dataset.from_list(texts)
@@ -84,12 +107,15 @@ def hf_pipeline(
         generation_kwargs.pop("num_beams")
 
     generation_kwargs["num_return_sequences"] = best_of
+    # generation_kwargs['custom_generate'] = "transformers-community/group-beam-search"
+    # generation_kwargs["num_beam_groups"] = 8
+    # generation_kwargs["diversity_penalty"] = 1.2
+    # generation_kwargs['trust_remote_code'] = True
+    compute_batch = partial(compute_logits, best_of=best_of, pad_token_id=tokenizer.pad_token_id)
 
     preds = []
-    if enable_tqdm:
-        texts = tqdm(texts, desc="Generating...")
 
-    for i, batch in enumerate(texts):
+    for i, batch in enumerate(tqdm(texts, desc="Generating...")):
         model_inputs = tokenizer.apply_chat_template(
             batch['messages'],
             add_generation_prompt=True,
@@ -99,22 +125,20 @@ def hf_pipeline(
             return_tensors='pt'
         ).to(model.device)
 
-        input_len = [len(input_ids.flatten()) for input_ids in model_inputs['input_ids']]
-        
-        model_inputs = {
-            k: v.to(model.device)
-            for k, v in model_inputs.items()
-        }
+        input_ids = model_inputs['input_ids'].cpu()
+        input_len = model_inputs['input_ids'].shape[1]
 
         outputs = model.generate(**model_inputs, **generation_kwargs)
-        outputs = torch.stack([torch.stack([seq for seq in outputs[i:i+best_of]]) for i in range(0, len(outputs), best_of)])
-        mts = [tokenizer.batch_decode([seq[input_len[i]:] for seq in outputs[i]], skip_special_tokens=True) for i in range(len(outputs))]
-
-        best = reranker.rerank(batch['src'], mts, **reranker_args)
+        if reranker_type == "self":
+            sequences, batches = compute_batch(input_ids, outputs)
+            best = reranker.rerank(sequences, batches, **reranker_args)
+        else:
+            sequences = outputs.cpu()
+            outputs = torch.stack([torch.stack([seq for seq in sequences[i:i+best_of]]) for i in range(0, len(sequences), best_of)])
+            mts = [tokenizer.batch_decode([seq[input_len:] for seq in sequences[i]], skip_special_tokens=True) for i in range(len(sequences))]
+            best = reranker.rerank(batch['src'], mts, **reranker_args)
         if i % 4 == 0:
-            gc.collect()
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
+            flush()
         preds += best
     return preds
 
@@ -126,10 +150,11 @@ def vllm_pipeline(
     sampling_params: SamplingParams | None = None,
     reranker_type: Literal["ratios", "likelihood", "comet", "combined"] | None = None,
     granularity: Literal['token', 'segment', 'sequence'] | None = None,
+    per_segment_eval: bool = False,
     reranker_args: dict | None = None,
 ):
     
-    reranker = load_reranker(reranker_type, granularity=granularity, device_map=device_map)
+    reranker = load_reranker(reranker_type, granularity=granularity, per_segment_eval=per_segment_eval, device_map=device_map)
 
     if isinstance(texts, list):
         texts = Dataset.from_list(texts)

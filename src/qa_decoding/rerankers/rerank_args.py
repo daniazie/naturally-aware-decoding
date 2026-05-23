@@ -10,7 +10,7 @@ class RatioArgs:
 @dataclass
 class LikelihoodArgs:
     tgt_lang: str | None = None
-    metric: Literal["entropy", "surprisal", "logprobs", "perplexity"] = "entropy"
+    metric: Literal["entropy", "surprisal", "perplexity"] = "entropy"
     return_score: bool = False
     normalise_scores: bool = False
 

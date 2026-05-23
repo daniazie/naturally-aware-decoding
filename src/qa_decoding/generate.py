@@ -11,8 +11,8 @@ import os
 import gc
 
 from rerankers import RatioArgs, LikelihoodArgs, CometArgs, RerankerArgs
-from data_utils import GenerationConfig, vLLMGenerationConfig, load_dataset
-from gen_utils import tune, vllm_generator, hf_generator
+from data_utils import load_dataset
+from gen_utils import GenerationConfig, vLLMGenerationConfig, ModelArgs, tune, vllm_generator, hf_generator
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
@@ -25,8 +25,9 @@ def init_parser():
     parser.add_argument('--output_file', type=str, default=None)
     parser.add_argument('--batch_size', type=int, default=None)
     parser.add_argument('--vllm', action='store_true', default=False)
-    parser.add_argument('--reranker_type', choices=['ratios', 'likelihood', 'comet', 'combined', 'none'], default=None)
+    parser.add_argument('--reranker_type', choices=['ratios', 'likelihood', 'self', 'comet', 'combined', 'none'], default=None)
     parser.add_argument('--granularity', choices=["token", "segment", "sequence"], default=None)
+    parser.add_argument('--per_segment_eval', action='store_true', default=False)
     parser.add_argument('--tune_reranker', action="store_true", default=False)
     return parser
 
@@ -37,7 +38,7 @@ def parse_args(args):
     if reranker_type is not None:
         if reranker_type == 'ratios':
             reranker_config = RatioArgs
-        elif reranker_type == "likelihood":
+        elif reranker_type == "likelihood" or reranker_type == 'self':
             reranker_config = LikelihoodArgs
         elif reranker_type == 'comet':
             reranker_config = CometArgs
@@ -68,7 +69,8 @@ if __name__ == "__main__":
     args, generation_kwargs, rerank_args = parse_args(args)
     print(args, generation_kwargs, rerank_args)
 
-    dataset_loader = partial(load_dataset, args.data_path, args.tgt_lang, convert_chat_template=args.vllm)
+    format_message = "translategemma" if "translategemma" in args.model else "messages"
+    dataset_loader = partial(load_dataset, args.data_path, args.tgt_lang, format_message=format_message, convert_chat_template=args.vllm)
 
     if args.tune_reranker:
         tune(args, generation_kwargs)

@@ -2,33 +2,14 @@ from transformers import PreTrainedTokenizerBase
 from dataclasses import dataclass
 from datasets import Dataset
 from datasets import load_dataset as load_ds
-from typing import List
+from functools import partial
+from typing import List, Literal
 from pathlib import Path
 import random
 import torch
 import numpy as np
 
-@dataclass
-class GenerationConfig:
-    top_k: int = 20
-    num_beams: int | None = None
-    do_sample: bool = True
-    top_p: float = 0.95
-    temperature: float = 0.6
-    max_new_tokens: int = 1024
 
-@dataclass
-class vLLMGenerationConfig:
-    top_k: int = 20
-    top_p: float = 0.95
-    temperature: float = 0.6
-    max_tokens: int = 1024
-
-@dataclass
-class ModelArgs:
-    attn_implementation: str = "sdpa"
-    dtype: torch.dtype = torch.bfloat16
-    device_map: str = "auto"
 
 code2name = {
     "zho": "Chinese",
@@ -54,7 +35,7 @@ name2code = {
     for v, k in code2name.items()
 }
 
-def load_dataset(data_path="NTREX/NTREX-128", tgt_lang: str = "zho", convert_chat_template: bool = False, split: str | None = None, tokenizer: PreTrainedTokenizerBase | None = None):
+def load_dataset(data_path="NTREX/NTREX-128", tgt_lang: str = "zho", format_message: Literal['translategemma', 'messages'] = 'messages', convert_chat_template: bool = False, split: str | None = None, tokenizer: PreTrainedTokenizerBase | None = None):
     random.seed(42)
     if Path(data_path).exists():
         with open(f"{data_path}/newstest2019-src.eng.txt", "r") as file:
@@ -85,7 +66,11 @@ def load_dataset(data_path="NTREX/NTREX-128", tgt_lang: str = "zho", convert_cha
             })
         data = random.sample(data, 100)
         dataset = Dataset.from_list(data)
-    dataset = dataset.map(format_messages, fn_kwargs={"lang": code2name[tgt_lang]}, batched=True)
+    if format_message == "messages":
+        format_fn = partial(format_messages, lang=code2name[tgt_lang])
+    elif format_message == 'translategemma':
+        format_fn = partial(format_prompts_for_translategemma, lang=code2name[tgt_lang])
+    dataset = dataset.map(format_fn, batched=True)
     if convert_chat_template:
         dataset = dataset.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer}, batched=True)
         
@@ -100,9 +85,28 @@ def format_messages(examples, lang):
 
     return {"messages": messages}
 
+def format_prompts_for_translategemma(examples, lang):
+    prompts = []
+    lang_map = {
+        "msa": "ms-MY",
+        "zho": "zh-CN",
+        "kor": "ko-KR"
+    }
+    for example in examples['src']:
+        prompts.append([
+            {
+                "type": "text",
+                "source_lang_code": "en",
+                "target_lang_code": lang_map[lang],
+                "text": example
+            }
+        ])
+    return {"prompts": prompts}
+
 def apply_chat_template(examples, tokenizer: PreTrainedTokenizerBase):
     prompts = []
-    for text in examples['messages']:
+    prompt_key = "messages" if examples.get("messages") is not None else "prompt"
+    for text in examples[prompt_key]:
         prompt = tokenizer.apply_chat_template(
             text,
             enable_thinking=False,

@@ -9,7 +9,7 @@ import numpy as np
 from data_utils import prepare_data
 
 class BaseReranker(metaclass=ABCMeta):
-    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase | None = None, *args, **kwargs):
+    def __init__(self, model: PreTrainedModel | None = None, tokenizer: PreTrainedTokenizerBase | None = None, *args, **kwargs):
         if tokenizer:
             self.prepare_data = partial(prepare_data, tokenizer=tokenizer)
 

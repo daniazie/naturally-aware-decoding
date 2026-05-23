@@ -76,7 +76,7 @@ class Segmenter:
             if not k in _exclude_keys
         }
 
-        logits: torch.Tensor = self.model(**forward_inputs).logits[:, :-1].cpu()
+        logits: torch.Tensor = self.model(**forward_inputs, use_cache=True).logits[:, :-1].cpu()
         labels: torch.Tensor = forward_inputs['input_ids'][:, 1:].cpu()
         completion_mask: torch.Tensor = batch['completion_mask'][:, 1:].bool().cpu()
 

@@ -13,6 +13,7 @@ dependencies = [
     "ipywidgets>=8.1.8",
     "jupyterlab>=4.5.7",
     "kernels>=0.14.0",
+    "litlogger>=2026.5.12",
     "litmodels>=0.1.8",
     "malaya>=5.1.1",
     "matplotlib>=3.10.9",
