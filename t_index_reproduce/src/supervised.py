@@ -10,7 +10,11 @@ from datasets import Dataset
 from torch.utils.data import DataLoader
 
 
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSequenceClassification
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
+)
 from openrlhf.models import get_llm_for_sequence_regression
 from tqdm import tqdm
 from openrlhf.datasets import RewardDataset
@@ -18,19 +22,19 @@ from openrlhf.datasets import RewardDataset
 
 from train_utils import format_messages
 
+
 def rm(reward_model, tokenizer, data, batch_size, max_length):
-    
     prompts = [
-        msgs[0]["content"] for msgs in
-        data[data.completion_label==1].messages.tolist()
+        msgs[0]["content"]
+        for msgs in data[data.completion_label == 1].messages.tolist()
     ]
     chosen = [
-        msgs[1]["content"] for msgs in
-        data[data.completion_label==1].messages.tolist()
+        msgs[1]["content"]
+        for msgs in data[data.completion_label == 1].messages.tolist()
     ]
     rejected = [
-        msgs[1]["content"] for msgs in
-        data[data.completion_label==0].messages.tolist()
+        msgs[1]["content"]
+        for msgs in data[data.completion_label == 0].messages.tolist()
     ]
     data = Dataset.from_dict(
         {
@@ -39,6 +43,7 @@ def rm(reward_model, tokenizer, data, batch_size, max_length):
             "rejected": rejected,
         }
     )
+
     # init a psuedo strategy
     class Strategy:
         def __init__(self):
@@ -58,19 +63,23 @@ def rm(reward_model, tokenizer, data, batch_size, max_length):
     )
 
     dataloader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        collate_fn=dataset.collate_fn
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=dataset.collate_fn,
     )
-            
+
     def concatenated_forward(model, tokenizer, chosen_ids, c_mask, reject_ids, r_mask):
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
-        input_ids, att_masks = concatenated_inputs(tokenizer, chosen_ids, c_mask, reject_ids, r_mask)
-        all_values, output = model(input_ids, attention_mask=att_masks, return_output=True)
+        input_ids, att_masks = concatenated_inputs(
+            tokenizer, chosen_ids, c_mask, reject_ids, r_mask
+        )
+        all_values, output = model(
+            input_ids, attention_mask=att_masks, return_output=True
+        )
         chosen_rewards = all_values[: chosen_ids.shape[0]]
         rejected_rewards = all_values[chosen_ids.shape[0] :]
         aux_loss = output.aux_loss if "aux_loss" in output else []
@@ -94,7 +103,14 @@ def rm(reward_model, tokenizer, data, batch_size, max_length):
                 pad_size[dim] = length - tensor.size(dim)
                 # left pad
                 return torch.cat(
-                    [pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device), tensor], dim=dim
+                    [
+                        pad_value
+                        * torch.ones(
+                            *pad_size, dtype=tensor.dtype, device=tensor.device
+                        ),
+                        tensor,
+                    ],
+                    dim=dim,
                 )
 
         max_length = max(chosen_ids.shape[1], reject_ids.shape[1])
@@ -106,9 +122,14 @@ def rm(reward_model, tokenizer, data, batch_size, max_length):
             dim=0,
         )
         max_length = max(c_mask.shape[1], r_mask.shape[1])
-        att_masks = torch.cat((pad_to_length(c_mask, max_length, 0), pad_to_length(r_mask, max_length, 0)), dim=0)
+        att_masks = torch.cat(
+            (
+                pad_to_length(c_mask, max_length, 0),
+                pad_to_length(r_mask, max_length, 0),
+            ),
+            dim=0,
+        )
         return inputs_ids, att_masks
-
 
     with torch.no_grad():
         rewards = []
@@ -132,18 +153,17 @@ def rm(reward_model, tokenizer, data, batch_size, max_length):
 
 
 def dpo(reward_model, tokenizer, data, batch_size, max_length):
-    
     prompts = [
-        msgs[0]["content"] for msgs in
-        data[data.completion_label==1].messages.tolist()
+        msgs[0]["content"]
+        for msgs in data[data.completion_label == 1].messages.tolist()
     ]
     chosen = [
-        msgs[1]["content"] for msgs in
-        data[data.completion_label==1].messages.tolist()
+        msgs[1]["content"]
+        for msgs in data[data.completion_label == 1].messages.tolist()
     ]
     rejected = [
-        msgs[1]["content"] for msgs in
-        data[data.completion_label==0].messages.tolist()
+        msgs[1]["content"]
+        for msgs in data[data.completion_label == 0].messages.tolist()
     ]
     data = Dataset.from_dict(
         {
@@ -152,6 +172,7 @@ def dpo(reward_model, tokenizer, data, batch_size, max_length):
             "rejected": rejected,
         }
     )
+
     # init a psuedo strategy
     class Strategy:
         def __init__(self):
@@ -170,20 +191,24 @@ def dpo(reward_model, tokenizer, data, batch_size, max_length):
         input_template=None,
         is_dpo=True,
     )
-    
+
     dataloader = DataLoader(
-        dataset, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        collate_fn=dataset.collate_fn
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=dataset.collate_fn,
     )
-            
-    def concatenated_forward(model, tokenizer, chosen_ids, c_mask, reject_ids, r_mask, prompt_len):
+
+    def concatenated_forward(
+        model, tokenizer, chosen_ids, c_mask, reject_ids, r_mask, prompt_len
+    ):
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
-        input_ids, att_masks, response_mask = concatenated_inputs(tokenizer, chosen_ids, c_mask, reject_ids, r_mask, prompt_len)
+        input_ids, att_masks, response_mask = concatenated_inputs(
+            tokenizer, chosen_ids, c_mask, reject_ids, r_mask, prompt_len
+        )
         logits = model(input_ids, attention_mask=att_masks).logits[:, :-1]
         input_ids = input_ids[:, 1:]
         response_mask = response_mask[:, 1:].bool()
@@ -195,7 +220,9 @@ def dpo(reward_model, tokenizer, data, batch_size, max_length):
         rejected_rewards = all_values[chosen_ids.shape[0] :]
         return chosen_rewards, rejected_rewards
 
-    def concatenated_inputs(tokenizer, chosen_ids, c_mask, reject_ids, r_mask, prompt_len):
+    def concatenated_inputs(
+        tokenizer, chosen_ids, c_mask, reject_ids, r_mask, prompt_len
+    ):
         """Concatenate the chosen and rejected inputs into a single tensor.
 
         Args:
@@ -213,7 +240,14 @@ def dpo(reward_model, tokenizer, data, batch_size, max_length):
                 pad_size[dim] = length - tensor.size(dim)
                 # right pad
                 return torch.cat(
-                    [tensor, pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device)], dim=dim
+                    [
+                        tensor,
+                        pad_value
+                        * torch.ones(
+                            *pad_size, dtype=tensor.dtype, device=tensor.device
+                        ),
+                    ],
+                    dim=dim,
                 )
 
         max_length = max(chosen_ids.shape[1], reject_ids.shape[1])
@@ -225,14 +259,19 @@ def dpo(reward_model, tokenizer, data, batch_size, max_length):
             dim=0,
         )
         max_length = max(c_mask.shape[1], r_mask.shape[1])
-        att_masks = torch.cat((pad_to_length(c_mask, max_length, 0), pad_to_length(r_mask, max_length, 0)), dim=0)
+        att_masks = torch.cat(
+            (
+                pad_to_length(c_mask, max_length, 0),
+                pad_to_length(r_mask, max_length, 0),
+            ),
+            dim=0,
+        )
         response_masks = att_masks.clone()
-        
+
         prompt_len = prompt_len + prompt_len
         for i in range(att_masks.size(0)):
-            response_masks[i, :prompt_len[i]] = 0
+            response_masks[i, : prompt_len[i]] = 0
         return inputs_ids, att_masks, response_masks
-
 
     with torch.no_grad():
         rewards = []
@@ -244,7 +283,13 @@ def dpo(reward_model, tokenizer, data, batch_size, max_length):
             r_mask = r_mask.squeeze(1).to(torch.cuda.current_device())
 
             chosen_reward, reject_reward = concatenated_forward(
-                reward_model, tokenizer, chosen_ids, c_mask, reject_ids, r_mask, prompt_len
+                reward_model,
+                tokenizer,
+                chosen_ids,
+                c_mask,
+                reject_ids,
+                r_mask,
+                prompt_len,
             )
             chosen_reward = chosen_reward.flatten().cpu().tolist()
             reject_reward = reject_reward.flatten().cpu().tolist()
@@ -254,11 +299,17 @@ def dpo(reward_model, tokenizer, data, batch_size, max_length):
 
     return rewards
 
+
 def xlmr(clf_model, tokenizer, data, batch_size, max_length):
     max_length = min(max_length, 512)
+
     def preprocess_function(examples):
-        sentences = [msgs[1]["content"].split("\n\n")[-1] for msgs in examples["messages"]]
-        result = tokenizer(sentences, padding=True, max_length=max_length, truncation=True)
+        sentences = [
+            msgs[1]["content"].split("\n\n")[-1] for msgs in examples["messages"]
+        ]
+        result = tokenizer(
+            sentences, padding=True, max_length=max_length, truncation=True
+        )
         # result["label"] = examples["completion_label"]
         return result
 
@@ -275,7 +326,9 @@ def xlmr(clf_model, tokenizer, data, batch_size, max_length):
     with torch.no_grad():
         scores = []
         for i in tqdm(range(0, len(data), batch_size)):
-            batch = {k: v.to(clf_model.device) for k, v in data[i:i+batch_size].items()}
+            batch = {
+                k: v.to(clf_model.device) for k, v in data[i : i + batch_size].items()
+            }
             logits = clf_model(**batch).logits
             predictions = torch.argmax(logits, dim=-1)
             scores.extend(predictions.cpu().tolist())
@@ -284,7 +337,7 @@ def xlmr(clf_model, tokenizer, data, batch_size, max_length):
 
 
 def main(args):
-    results = { 
+    results = {
         "file_path": [],
         "messages_for_positive_model": [],
         "messages_for_negative_model": [],
@@ -297,11 +350,10 @@ def main(args):
         reward_model = get_llm_for_sequence_regression(
             args.model_path,
             "reward",
-            param_dtype='bf16',
+            param_dtype="bf16",
             init_value_head=False,
         )
         return reward_model
-
 
     def load_dpo(args):
         reward_model = AutoModelForCausalLM.from_pretrained(
@@ -337,8 +389,10 @@ def main(args):
     model.eval()
 
     for path in glob(args.data_path):
-
-        dataset_for_positive_model, dataset_for_negative_model = format_messages(
+        (
+            dataset_for_positive_model,
+            dataset_for_negative_model,
+        ) = format_messages(
             path,
             args.prompt_field,
             args.completion_positive_field,
@@ -347,20 +401,36 @@ def main(args):
             args.prompt_template_negative,
         )
 
-        scores = score(model, tokenizer, dataset_for_positive_model, args.batch_size, args.max_length)
+        scores = score(
+            model,
+            tokenizer,
+            dataset_for_positive_model,
+            args.batch_size,
+            args.max_length,
+        )
         results["file_path"].extend([path] * len(scores))
-        results["messages_for_positive_model"].extend(dataset_for_positive_model.messages.tolist())
-        results["messages_for_negative_model"].extend(dataset_for_negative_model.messages.tolist())
+        results["messages_for_positive_model"].extend(
+            dataset_for_positive_model.messages.tolist()
+        )
+        results["messages_for_negative_model"].extend(
+            dataset_for_negative_model.messages.tolist()
+        )
         results["label"].extend(dataset_for_positive_model.completion_label.tolist())
         results[score_key].extend(scores)
-    
+
     df = pd.DataFrame(results)
 
     output_dir = os.path.dirname(args.output_file)
     output_dir = output_dir if output_dir else "."
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    df.to_json(args.output_file, index=False, orient="records", lines=True, force_ascii=False)
+    df.to_json(
+        args.output_file,
+        index=False,
+        orient="records",
+        lines=True,
+        force_ascii=False,
+    )
 
 
 if __name__ == "__main__":
@@ -379,7 +449,11 @@ if __name__ == "__main__":
     parser.add_argument("--num_proc", type=int, default=None)
     parser.add_argument("--max_length", type=int, default=None)
     parser.add_argument("--model_args", type=str, default=None)
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+    )
     parser.add_argument("--model_type", type=str, choices=["rm", "dpo", "clf"])
     args = parser.parse_args()
 
@@ -395,4 +469,3 @@ if __name__ == "__main__":
     print(args)
 
     main(args)
-            

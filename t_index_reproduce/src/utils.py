@@ -11,6 +11,7 @@ def load_df(path):
     else:
         raise ValueError("Unsupported file format")
 
+
 def format_messages(
     file_path,
     prompt_field,
@@ -31,23 +32,37 @@ def format_messages(
     messages = {
         "prompt_template_label": [],
         "completion_label": [],
-        "messages": []
+        "messages": [],
     }
     for i, row in df.iterrows():
-        for prompt_template_label, prompt_template in enumerate([prompt_template_negative, prompt_template_positive]):
+        for prompt_template_label, prompt_template in enumerate(
+            [prompt_template_negative, prompt_template_positive]
+        ):
             try:
                 messages["messages"].append(
                     [
-                        {"role": "user", "content": prompt_template.format(input=row[prompt_field])},
-                        {"role": "assistant", "content": row[completion_positive_field]},
+                        {
+                            "role": "user",
+                            "content": prompt_template.format(input=row[prompt_field]),
+                        },
+                        {
+                            "role": "assistant",
+                            "content": row[completion_positive_field],
+                        },
                     ]
                 )
                 messages["prompt_template_label"].append(prompt_template_label)
                 messages["completion_label"].append(1)
                 messages["messages"].append(
                     [
-                        {"role": "user", "content": prompt_template.format(input=row[prompt_field])},
-                        {"role": "assistant", "content": row[completion_negative_field]},
+                        {
+                            "role": "user",
+                            "content": prompt_template.format(input=row[prompt_field]),
+                        },
+                        {
+                            "role": "assistant",
+                            "content": row[completion_negative_field],
+                        },
                     ]
                 )
                 messages["prompt_template_label"].append(prompt_template_label)
@@ -55,16 +70,32 @@ def format_messages(
             except KeyError:
                 messages["messages"].append(
                     [
-                        {"role": "user", "content": prompt_template.format(input=row[f"{prompt_field}_{completion_positive_field}"])},
-                        {"role": "assistant", "content": row[completion_positive_field]},
+                        {
+                            "role": "user",
+                            "content": prompt_template.format(
+                                input=row[f"{prompt_field}_{completion_positive_field}"]
+                            ),
+                        },
+                        {
+                            "role": "assistant",
+                            "content": row[completion_positive_field],
+                        },
                     ]
                 )
                 messages["prompt_template_label"].append(prompt_template_label)
                 messages["completion_label"].append(1)
                 messages["messages"].append(
                     [
-                        {"role": "user", "content": prompt_template.format(input=row[f"{prompt_field}_{completion_negative_field}"])},
-                        {"role": "assistant", "content": row[completion_negative_field]},
+                        {
+                            "role": "user",
+                            "content": prompt_template.format(
+                                input=row[f"{prompt_field}_{completion_negative_field}"]
+                            ),
+                        },
+                        {
+                            "role": "assistant",
+                            "content": row[completion_negative_field],
+                        },
                     ]
                 )
                 messages["prompt_template_label"].append(prompt_template_label)

@@ -1,5 +1,5 @@
 """
-Implementation of Trajectory Volatility (TV) score for 
+Implementation of Trajectory Volatility (TV) score for
 translationese measurment, adapted from the original code
 for OOD detection in math reasoning:
 https://github.com/Alsace08/OOD-Math-Reasoning
@@ -16,11 +16,16 @@ def softmax(x):
     softmax_x = exp_x / np.sum(exp_x)
     return softmax_x
 
+
 class OODScore:
     def __init__(self, OOD_info, ID_info):
         self.total_layer_num = len(OOD_info["hidden_state"][0])
-        self.ID_mean_hs_all_layer = np.array([ID_info[layer]["mean_hs"][0] for layer in range(self.total_layer_num)])
-        self.ID_var_hs_all_layer = np.array([ID_info[layer]["var_hs"][0] for layer in range(self.total_layer_num)])
+        self.ID_mean_hs_all_layer = np.array(
+            [ID_info[layer]["mean_hs"][0] for layer in range(self.total_layer_num)]
+        )
+        self.ID_var_hs_all_layer = np.array(
+            [ID_info[layer]["var_hs"][0] for layer in range(self.total_layer_num)]
+        )
         self.OOD_hs_all_layer = np.array(OOD_info["hidden_state"][0])
 
     def get_tv_score(self, max_order):
@@ -35,7 +40,9 @@ class OODScore:
             for order in range(max_order + 1):
                 tmp_diff = np.array([0] * emb_dim).astype(np.float64)
                 for j in reversed(range(order + 1)):
-                    tmp_diff += ((-1) ** (order - j)) * comb(order, order - j) * OOD_layer_hs[j]
+                    tmp_diff += (
+                        ((-1) ** (order - j)) * comb(order, order - j) * OOD_layer_hs[j]
+                    )
                 OOD_layer_hs_diff.append(tmp_diff)
 
             ### ID
@@ -45,9 +52,16 @@ class OODScore:
                 ID_var_layer_hs.append(self.ID_var_hs_all_layer[layer_num + order])
             ID_mean_layer_hs_diff, ID_var_layer_hs_diff = [], []
             for order in range(max_order + 1):
-                tmp_mean_diff, tmp_var_diff = np.array([0] * emb_dim).astype(np.float64), np.array([0] * emb_dim).astype(np.float64)
+                tmp_mean_diff, tmp_var_diff = (
+                    np.array([0] * emb_dim).astype(np.float64),
+                    np.array([0] * emb_dim).astype(np.float64),
+                )
                 for j in reversed(range(order + 1)):
-                    tmp_mean_diff += ((-1) ** (order - j)) * comb(order, order - j) * ID_mean_layer_hs[j]
+                    tmp_mean_diff += (
+                        ((-1) ** (order - j))
+                        * comb(order, order - j)
+                        * ID_mean_layer_hs[j]
+                    )
                     tmp_var_diff += comb(order, order - j) * ID_var_layer_hs[j]
                 ID_mean_layer_hs_diff.append(tmp_mean_diff)
                 ID_var_layer_hs_diff.append(tmp_var_diff)
@@ -55,16 +69,27 @@ class OODScore:
             ### Mahalanobis Distance
             md_per_layer = []
             for i in range(max_order + 1):
-                 md_per_layer.append(np.linalg.norm(
-                [(OOD_layer_hs_diff[i][dim] - ID_mean_layer_hs_diff[i][dim]) ** 2 / ID_var_layer_hs_diff[i][dim]
-                 for dim in range(len(ID_mean_layer_hs_diff[i]))], ord=2))
+                md_per_layer.append(
+                    np.linalg.norm(
+                        [
+                            (OOD_layer_hs_diff[i][dim] - ID_mean_layer_hs_diff[i][dim])
+                            ** 2
+                            / ID_var_layer_hs_diff[i][dim]
+                            for dim in range(len(ID_mean_layer_hs_diff[i]))
+                        ],
+                        ord=2,
+                    )
+                )
             md_all_layer.append(md_per_layer)
 
         tv_score_all = []
         tv_score_per_layer = []
         md_all_layer = np.array(md_all_layer)
         for i in range(max_order + 1):
-            tv_score_per_layer_i = [abs(md_all_layer[:, i][j+1] - md_all_layer[:, i][j]) for j in range(len(md_all_layer[:, i]) - 1)]
+            tv_score_per_layer_i = [
+                abs(md_all_layer[:, i][j + 1] - md_all_layer[:, i][j])
+                for j in range(len(md_all_layer[:, i]) - 1)
+            ]
             tv_score_all_i = np.mean(tv_score_per_layer_i)
             tv_score_per_layer.append(tv_score_per_layer_i)
             tv_score_all.append(tv_score_all_i)
@@ -80,39 +105,58 @@ class OutOfDistInfo:
         TVscore = []
         for i in idx_list:
             OODscore = OODScore(self.info[i], ID_info)
-            tv_score_all, tv_score_per_layer = OODscore.get_tv_score(max_order=5) ### layer number x max_order
+            tv_score_all, tv_score_per_layer = OODscore.get_tv_score(
+                max_order=5
+            )  ### layer number x max_order
             tmp = []
-            print(f"******** idx: {i} Score (k = 0: w/o DiSmo, k > 0: w/ DiSmo) ********")
+            print(
+                f"******** idx: {i} Score (k = 0: w/o DiSmo, k > 0: w/ DiSmo) ********"
+            )
             for k in range(max_order + 1):
                 tmp.append(round(tv_score_all[k], 2))
-                print(f'TV_k={k}: {round(tv_score_all[k], 2)}')
+                print(f"TV_k={k}: {round(tv_score_all[k], 2)}")
             TVscore.append(tmp)
 
         return TVscore
+
 
 def get_mean_var_hs_all_layer(hs_all_sample_all_layer):
     mean_hs_all_layer = []
     var_hs_all_layer = []
     for i in range(len(hs_all_sample_all_layer[0])):
-        layer_hs = [hs_all_sample_all_layer[j][i] for j in range(len(hs_all_sample_all_layer))]
+        layer_hs = [
+            hs_all_sample_all_layer[j][i] for j in range(len(hs_all_sample_all_layer))
+        ]
         mean_layer_hs = np.mean(np.array(layer_hs), axis=0, keepdims=True)
         var_layer_hs = np.var(np.array(layer_hs), axis=0, keepdims=True)
         mean_hs_all_layer.append(mean_layer_hs)
         var_hs_all_layer.append(var_layer_hs)
     return mean_hs_all_layer, var_hs_all_layer
 
+
 def get_IDinfo(hs_all_sample_all_layer):
-    mean_hs_all_layer, var_hs_all_layer = get_mean_var_hs_all_layer(hs_all_sample_all_layer)
+    mean_hs_all_layer, var_hs_all_layer = get_mean_var_hs_all_layer(
+        hs_all_sample_all_layer
+    )
     layer_num = len(hs_all_sample_all_layer[0])
     data_info = []
-    data_info.append({"layer": 0,
-                        "mean_hs": [[0] * len(mean_hs_all_layer[1][0])],
-                        "var_hs": [[0] * len(var_hs_all_layer[1][0])]})
+    data_info.append(
+        {
+            "layer": 0,
+            "mean_hs": [[0] * len(mean_hs_all_layer[1][0])],
+            "var_hs": [[0] * len(var_hs_all_layer[1][0])],
+        }
+    )
     for i in range(1, layer_num):
-        data_info.append({"layer": i,
-                            "mean_hs": mean_hs_all_layer[i],
-                            "var_hs": var_hs_all_layer[i]})
+        data_info.append(
+            {
+                "layer": i,
+                "mean_hs": mean_hs_all_layer[i],
+                "var_hs": var_hs_all_layer[i],
+            }
+        )
     return data_info
+
 
 def score_trajectory_volatility_fn(ID_info, **kwargs):
     scores = []

@@ -6,3 +6,5 @@ _tests
 _*
 results/*
 evaluation/scores/*
+
+.ruff_cache
