@@ -57,7 +57,6 @@ def vllm_generator(dataset_loader, args, generation_kwargs, rerank_args=None):
         quantization="bitsandbytes",
         gpu_memory_utilization=0.80 if args.reranker_type is not None else 0.92,
         dtype="bfloat16",
-        cpu_offload_gb=4,
         distributed_executor_backend="mp",
     )
 
